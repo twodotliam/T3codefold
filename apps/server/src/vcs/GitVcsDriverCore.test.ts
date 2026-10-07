@@ -2794,6 +2794,53 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
   });
 
   describe("worktree operations", () => {
+    it.effect("runs repository-local setup hooks around creation", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        yield* git(cwd, ["config", "t3.beforeWorktreeCreate", "printf ready > before-creation"]);
+        yield* git(cwd, [
+          "config",
+          "t3.afterWorktreeCreate",
+          "test -f README.md && printf installed > setup-result",
+        ]);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        const created = yield* driver.createWorktree({
+          cwd,
+          refName: initialBranch,
+          newRefName: "lb/my-task",
+          path: path.join(yield* makeTmpDir(), "my-task"),
+        });
+        assert.equal(yield* fs.readFileString(path.join(cwd, "before-creation")), "ready");
+        assert.equal(
+          yield* fs.readFileString(path.join(created.worktree.path, "setup-result")),
+          "installed",
+        );
+      }),
+    );
+
+    it.effect("stops before creating the worktree when the preparation hook fails", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const path = yield* Path.Path;
+        yield* git(cwd, ["config", "t3.beforeWorktreeCreate", "exit 7"]);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        const failed = yield* driver
+          .createWorktree({
+            cwd,
+            refName: initialBranch,
+            newRefName: "lb/failed",
+            path: path.join(yield* makeTmpDir(), "failed"),
+          })
+          .pipe(Effect.result);
+        assert.equal(Result.isFailure(failed), true);
+        assert.equal(yield* git(cwd, ["branch", "--list", "lb/failed"]), "");
+      }),
+    );
+
     it.effect("uses parallel checkout without skipping filters or hooks", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();

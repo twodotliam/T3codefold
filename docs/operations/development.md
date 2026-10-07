@@ -178,6 +178,17 @@ caches carry the work across.
 Inspect effectiveness with `ccache -s`. Cleaning is a last resort, not routine hygiene: see the
 incremental-build rule in [AGENTS.md](../../AGENTS.md).
 
+## Machine-local worktree setup
+
+Set `t3.beforeWorktreeCreate` with `git config --local` to a shell command that prepares the
+source checkout before T3 creates a worktree, and `t3.afterWorktreeCreate` to initialize the new
+checkout after submodules are populated. They run at the corresponding checkout root using Git's
+shell-alias execution. T3 waits for each command, with a ten-minute timeout, before proceeding.
+A nonzero exit fails creation; the thread launch flow owns rollback once the new checkout has
+been claimed. Linked checkouts share the repository's local Git configuration, so the hooks
+apply to every checkout without committing machine-specific commands. Keep dependency installs
+in these hooks or in a project action, rather than running the same setup in both.
+
 ## Desktop artifacts
 
 Local artifact builds are unsigned by default and write to `release/`:

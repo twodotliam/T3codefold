@@ -3368,6 +3368,21 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       }
       worktreePath = path.join(parentDir, repoName, sanitizedBranch);
     }
+    // Machine-local setup hooks from the repository's git config, run as git shell aliases.
+    const runWorktreeCommand = Effect.fn("GitVcsDriver.runWorktreeCommand")(function* (
+      key: string,
+      cwd: string,
+    ) {
+      const command = yield* readConfigValue(input.cwd, key);
+      if (!command) return;
+      yield* executeGit(
+        "GitVcsDriver.createWorktree",
+        cwd,
+        ["-c", `alias.t3-worktree-hook=!${command}`, "t3-worktree-hook"],
+        { timeoutMs: 600_000, fallbackErrorDetail: `${key} failed` },
+      );
+    });
+    yield* runWorktreeCommand("t3.beforeWorktreeCreate", input.cwd);
     const args = input.newRefName
       ? ["worktree", "add", "-b", input.newRefName, worktreePath, input.refName]
       : ["worktree", "add", worktreePath, input.refName];
@@ -3487,6 +3502,8 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         baseBranch,
       ]);
     }
+
+    yield* runWorktreeCommand("t3.afterWorktreeCreate", worktreePath);
 
     return {
       worktree: {
