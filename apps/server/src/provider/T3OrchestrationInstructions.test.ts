@@ -115,7 +115,10 @@ describe("T3 orchestration provider instructions", () => {
 
     it("names the URL only for providers without AGENT_BROWSER_CDP", () => {
       const withEnv = t3AgentBrowserInstructionsFor(session, { includeUrl: false })!;
-      assert.include(withEnv, "already pointed at this thread's tabs through `AGENT_BROWSER_CDP`");
+      assert.include(
+        withEnv,
+        "T3 has set `AGENT_BROWSER_CDP` and `AGENT_BROWSER_SESSION` for this thread",
+      );
       assert.notInclude(withEnv, "token=");
       const withUrl = t3AgentBrowserInstructionsFor(session, { includeUrl: true })!;
       assert.include(withUrl, cdpUrl);

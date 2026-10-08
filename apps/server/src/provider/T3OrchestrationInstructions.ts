@@ -47,14 +47,13 @@ For browser work, first call \`preview_status\`. If no automation-capable previe
 
 Do not switch to global browser skills, Chrome, Node REPL browser automation, standalone Playwright, or agent-browser merely because the preview is initially closed or a first call fails. Use an alternative browser system only when the T3 preview tools are absent, the user explicitly requests another browser, or \`preview_open\` returns an explicit unsupported/unavailable error. A failed T3 preview tool call should be inspected and retried with corrected arguments when the error is actionable.
 
-agent-browser is also set up for this thread by default: when \`AGENT_BROWSER_CDP\` and \`AGENT_BROWSER_SESSION\` are set, it already targets this thread's preview tabs. You do not need it. Keep using the \`preview_*\` tools unless the user or the repository's own workflow specifically asks for agent-browser or another CDP client such as Playwright. When asked, run agent-browser plainly (\`agent-browser snapshot -i\`) without \`--cdp\`, \`--session\`, or \`connect\`, because another session can stay connected to a different thread's tabs; if the variables are unset, export both, using \`cdpUrl\` from \`preview_status\` and a session name unique to this thread. Playwright can use \`chromium.connectOverCDP(cdpUrl)\`. Its targets are the thread's tabs; opening one opens a tab the user sees. Use one tool per task rather than mixing it with \`preview_*\`. The preview keeps its own viewport size and color scheme.
+agent-browser is also set up for this thread, but stick with the \`preview_*\` tools unless the user or repository asks for agent-browser or Playwright. When they do, run agent-browser plainly (\`agent-browser snapshot -i\`) without \`--cdp\`, \`--session\`, or \`connect\`; if \`AGENT_BROWSER_CDP\` is unset, export it as \`cdpUrl\` from \`preview_status\`, with one \`AGENT_BROWSER_SESSION\` name for the whole task. Playwright can use \`chromium.connectOverCDP(cdpUrl)\`.
 `;
 
 /**
- * The browser block for sessions set to agent-browser tooling, which replaces
- * the preview-first block above. Providers whose processes receive
- * `AGENT_BROWSER_CDP` pass no URL; the rest pass the thread's endpoint, which
- * the agent then gives agent-browser with `--cdp`.
+ * Replaces the preview-first block above when a session prefers agent-browser.
+ * Providers whose processes receive `AGENT_BROWSER_CDP` pass no connection;
+ * the rest pass the values for the agent to export.
  */
 export function t3AgentBrowserInstructions(connection?: {
   readonly cdpUrl: string;
@@ -62,13 +61,17 @@ export function t3AgentBrowserInstructions(connection?: {
 }): string {
   const connect =
     connection === undefined
-      ? "agent-browser is already pointed at this thread's tabs through `AGENT_BROWSER_CDP` and `AGENT_BROWSER_SESSION`; do not pass `--cdp` or `--session`, run `connect`, or launch a separate browser."
-      : `Point agent-browser at this thread's tabs with \`export AGENT_BROWSER_CDP="${connection.cdpUrl}" AGENT_BROWSER_SESSION="${connection.session}"\` in the shell you run it from; do not launch a separate browser. Keep that session name: another session could still be connected to a different thread.`;
+      ? "T3 has set `AGENT_BROWSER_CDP` and `AGENT_BROWSER_SESSION` for this thread."
+      : `Run \`export AGENT_BROWSER_CDP="${connection.cdpUrl}" AGENT_BROWSER_SESSION="${connection.session}"\` in each shell you run agent-browser from.`;
   return `## T3 Code browser: agent-browser
 
-You are running inside T3 Code. For browser navigation, inspection, interaction, screenshots, recordings, and console or network logs, use the \`agent-browser\` CLI (\`npx agent-browser\` if it is not installed). ${connect} Its tabs are this thread's T3 browser tabs, shared with the user: a tab you open appears in their browser panel. Start with \`agent-browser tab list\` and \`agent-browser snapshot -i\`, prefer snapshot refs over coordinates, and take a fresh snapshot after navigating or switching tabs, since refs go stale. The preview keeps its own viewport size and color scheme, so viewport and device emulation have no effect.
+You are running inside T3 Code. Use \`agent-browser\` (\`npx agent-browser\` if needed) for browser navigation, inspection, interaction, screenshots, recordings, and console or network logs. It controls this thread's T3 preview tabs, shared with the user.
 
-The T3 \`preview_*\` tools reach the same tabs and remain available, for example to attach a recording to the thread; prefer agent-browser for everything else, and do not mix the two within one task.`;
+${connect} Keep both values as they are; do not pass \`--cdp\` or \`--session\`, run \`connect\`, or launch a separate browser.
+
+Start with \`agent-browser tab list\`, then \`agent-browser snapshot -i\`. Prefer snapshot refs over coordinates, and take a fresh snapshot after navigating, switching tabs, or page changes. The preview keeps its own viewport size and color scheme, so viewport and device emulation have no effect.
+
+The \`preview_*\` tools reach the same tabs and stay available, for example to attach a recording to the thread; use agent-browser for everything else.`;
 }
 
 /** The agent-browser block for a session set to that tooling, or undefined. */
