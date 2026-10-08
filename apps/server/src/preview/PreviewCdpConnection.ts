@@ -230,7 +230,7 @@ export function createPreviewCdpConnection(
       case "Target.activateTarget": {
         const tab = tabByTarget(params["targetId"]);
         if (!tab) throw new CdpError("No target with given id found");
-        host.revealTab(tab.tabId);
+        reveal(tab);
         return {};
       }
       case "Target.createTarget": {
@@ -240,7 +240,7 @@ export function createPreviewCdpConnection(
         );
         upsertTab(tab);
         // A tool's new tab surfaces like an agent's preview_open does.
-        host.revealTab(tab.tabId);
+        reveal(tab);
         return { targetId: tab.targetId };
       }
       case "Target.closeTarget": {
@@ -259,7 +259,8 @@ export function createPreviewCdpConnection(
     if (PREVIEW_OWNED_EMULATION.has(command.method)) return Promise.resolve({});
     if (command.method === "Page.close") return host.closeTab(tabId).then(() => ({}));
     if (command.method === "Page.bringToFront") {
-      host.revealTab(tabId);
+      const tab = tabs.get(tabId);
+      if (tab) reveal(tab);
       return Promise.resolve({});
     }
     // A tool that pauses new frames and workers holds them up for the person
@@ -271,6 +272,15 @@ export function createPreviewCdpConnection(
     return host.sessionCommand(tabId, command.sessionId!, command.method, forwarded);
   };
 
+  /** Tabs held back from showing until they leave about:blank. */
+  const revealOnNavigation = new Set<string>();
+  // agent-browser opens a blank page whenever it finds none, so a blank tab
+  // only surfaces once something is loaded into it.
+  const reveal = (tab: PreviewCdpTab) => {
+    if (tab.url === "about:blank" || tab.url === "") revealOnNavigation.add(tab.tabId);
+    else host.revealTab(tab.tabId);
+  };
+
   const upsertTab = (tab: PreviewCdpTab) => {
     const previous = tabs.get(tab.tabId);
     if (previous?.targetId !== undefined && previous.targetId !== tab.targetId) {
@@ -279,6 +289,10 @@ export function createPreviewCdpConnection(
     }
     const known = tabs.get(tab.tabId);
     tabs.set(tab.tabId, tab);
+    if (revealOnNavigation.has(tab.tabId) && tab.url !== "about:blank" && tab.url !== "") {
+      revealOnNavigation.delete(tab.tabId);
+      host.revealTab(tab.tabId);
+    }
     if (closed) return;
     if (!known) {
       if (discover)
@@ -297,6 +311,7 @@ export function createPreviewCdpConnection(
     const tabRoots = [...roots].filter((sessionId) => sessions.get(sessionId) === tabId);
     dropSessions(tabId);
     tabs.delete(tabId);
+    revealOnNavigation.delete(tabId);
     if (closed) return;
     for (const sessionId of tabRoots) {
       send({ method: "Target.detachedFromTarget", params: { sessionId, targetId: tab.targetId } });

@@ -673,6 +673,24 @@ it.live("reports a pending dialog without evaluating the page and resolves it ex
   ).pipe(Effect.provide(layer)),
 );
 
+it.live("an agent can close a tab an external tool opened on its thread", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const browser = yield* ServerBrowser.ServerBrowser;
+      const broker = yield* Broker.PreviewAutomationBroker;
+      yield* Effect.yieldNow;
+      const manager = yield* Manager.PreviewManager;
+      const threadId = scope.thread.threadId;
+      // As the CDP endpoint opens one: no agent claims it.
+      const { tabId } = yield* manager.open({ threadId, runtime: "server", reveal: false });
+      yield* browser.cdpTarget({ threadId, tabId });
+      yield* broker.invoke({ scope, tabId, operation: "close", input: {} });
+      expect(contexts[0]!.page.close).toHaveBeenCalled();
+      expect((yield* manager.list({ threadId })).sessions).toHaveLength(0);
+    }),
+  ).pipe(Effect.provide(layer)),
+);
+
 it.live("the owner can close a tab while an agent action waits on its dialog", () =>
   Effect.scoped(
     Effect.gen(function* () {

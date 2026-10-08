@@ -1519,7 +1519,10 @@ const make = Effect.gen(function* () {
         "No server preview tab is open for this thread. Call preview_open first.",
       );
     }
-    if (tab.control.agentId !== request.agentSessionId)
+    // A named tab no agent has claimed, such as one an external CDP tool opened, can still be closed.
+    const closingUnclaimed =
+      request.operation === "close" && request.tabIdExplicit && tab.control.agentId === null;
+    if (tab.control.agentId !== request.agentSessionId && !closingUnclaimed)
       throw new BrowserControlInterrupted(
         "This tab belongs to another agent session or a human. Open your own tab.",
         "agentMismatch",

@@ -226,6 +226,27 @@ describe("preview CDP connection", () => {
     expect((await call("Browser.close")).error.message).toMatch(/owns this browser/);
     expect((await call("Target.createBrowserContext")).error.message).toMatch(/Not supported/);
   });
+  it("shows a blank tab a tool opens only once something loads in it", async () => {
+    const { connection, call, revealed } = makeHarness();
+    // agent-browser opens one of these whenever it finds no tabs.
+    const { targetId } = (await call("Target.createTarget", { url: "about:blank" })).result;
+    await call("Target.activateTarget", { targetId });
+    expect(revealed).toEqual([]);
+    connection.upsertTab({
+      tabId: "tab-new-1",
+      targetId,
+      url: "http://localhost:5173/",
+      title: "",
+    });
+    connection.upsertTab({
+      tabId: "tab-new-1",
+      targetId,
+      url: "http://localhost:5173/a",
+      title: "",
+    });
+    expect(revealed).toEqual(["tab-new-1"]);
+  });
+
   it("asks to show tabs a tool opens or brings to the front, as preview_open does", async () => {
     const { connection, call, revealed, sent } = makeHarness();
     connection.upsertTab(docs);
