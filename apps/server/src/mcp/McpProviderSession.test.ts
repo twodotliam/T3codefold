@@ -70,3 +70,31 @@ describe("work CLI environment", () => {
     expect(workCliEnvironment(threadId)).toEqual({});
   });
 });
+
+describe("preview CDP environment", () => {
+  it("points agent-browser at the owning thread's preview tabs", () => {
+    const threadId = ThreadId.make("preview-cdp-environment-test");
+    const cdpUrl =
+      "ws://127.0.0.1:3773/api/preview/cdp?thread=preview-cdp-environment-test&token=t";
+    setMcpProviderSession({
+      threadId,
+      environmentId: EnvironmentId.make("fixture-env"),
+      providerSessionId: "fixture-session",
+      providerInstanceId: ProviderInstanceId.make("claude"),
+      endpoint: "http://localhost:9000/mcp",
+      authorizationHeader: "Bearer fixture-work",
+      browserToolsAvailable: true,
+      previewCdpUrl: cdpUrl,
+    });
+    try {
+      expect(providerSessionEnvironment({ PATH: "/usr/bin" }, threadId)).toMatchObject({
+        AGENT_BROWSER_CDP: cdpUrl,
+      });
+      expect(
+        providerSessionEnvironment({ PATH: "/usr/bin" }, ThreadId.make("unrelated")),
+      ).not.toHaveProperty("AGENT_BROWSER_CDP");
+    } finally {
+      clearMcpProviderSession(threadId);
+    }
+  });
+});

@@ -43,6 +43,7 @@ import * as ProjectService from "../project/ProjectService.ts";
 import * as McpProviderSession from "../mcp/McpProviderSession.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as McpSessionRegistry from "../mcp/McpSessionRegistry.ts";
+import * as PreviewCdp from "../preview/PreviewCdp.ts";
 import * as EventSink from "./EventSink.ts";
 import * as IdAllocator from "./IdAllocator.ts";
 import * as ProviderEventIngestor from "./ProviderEventIngestor.ts";
@@ -513,7 +514,20 @@ export const layerWithOptions = (
                   browserToolsAvailable,
                   capabilities,
                 });
-                McpProviderSession.setMcpProviderSession(credential.config);
+                const previewCdpUrl = browserToolsAvailable
+                  ? yield* Effect.serviceOption(PreviewCdp.PreviewCdp).pipe(
+                      Effect.flatMap(
+                        Option.match({
+                          onNone: () => Effect.succeed<string | undefined>(undefined),
+                          onSome: (previewCdp) => previewCdp.urlFor(threadId),
+                        }),
+                      ),
+                    )
+                  : undefined;
+                McpProviderSession.setMcpProviderSession({
+                  ...credential.config,
+                  ...(previewCdpUrl === undefined ? {} : { previewCdpUrl }),
+                });
                 reserveMcpCredential(threadId, credential.config.providerSessionId);
                 return { mcpCredentialId: credential.config.providerSessionId, issued: true };
               }),

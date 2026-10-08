@@ -76,6 +76,10 @@ export function createPreviewEnvironmentAtoms<R, E>(
       label: "environment-data:preview:clear-profile",
       tag: WS_METHODS.previewClearProfile,
     }),
+    cdpUrl: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:preview:cdp-url",
+      tag: WS_METHODS.previewCdpUrl,
+    }),
     reportStatus: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:preview:report-status",
       tag: WS_METHODS.previewReportStatus,

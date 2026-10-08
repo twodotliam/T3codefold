@@ -1,4 +1,5 @@
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as FileSystem from "effect/FileSystem";
 import * as Schema from "effect/Schema";
 import {
@@ -31,6 +32,7 @@ import * as ServerConfig from "../../../config.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
 import * as PreviewAutomationBroker from "../../PreviewAutomationBroker.ts";
+import * as PreviewCdp from "../../../preview/PreviewCdp.ts";
 import { PreviewSnapshotToolkit, PreviewStandardToolkit, PreviewToolkit } from "./tools.ts";
 
 /**
@@ -115,6 +117,17 @@ const invokeTargeted = <A extends object>(
   );
 };
 
+/** Adds the thread's CDP endpoint, so an agent can hand its tabs to a CDP tool. */
+const withCdpUrl = <A extends object, E, R>(status: Effect.Effect<A, E, R>) =>
+  Effect.gen(function* () {
+    const result = yield* status;
+    const scope = yield* McpInvocationContext.requireThreadMcpCapability("preview");
+    const previewCdp = yield* Effect.serviceOption(PreviewCdp.PreviewCdp);
+    if (Option.isNone(previewCdp)) return result;
+    const cdpUrl = yield* previewCdp.value.urlFor(scope.thread.threadId);
+    return cdpUrl === undefined ? result : { ...result, cdpUrl };
+  });
+
 const UploadedRecordingArtifact = Schema.Struct({
   ...PreviewAutomationRecordingArtifact.fields,
   uploadedAttachmentId: Schema.optional(Schema.String),
@@ -194,10 +207,10 @@ const handlers = {
     invokeTargeted<PreviewAutomationStatus>("dialog", input),
   ),
   preview_status: McpToolAccess.readsAsCaller((input) =>
-    invokeTargeted<PreviewAutomationStatus>("status", input ?? {}),
+    withCdpUrl(invokeTargeted<PreviewAutomationStatus>("status", input ?? {})),
   ),
   preview_open: McpToolAccess.actsAsCaller((input) =>
-    invokeTargeted<PreviewAutomationStatus>("open", normalizePreviewOpenInput(input)),
+    withCdpUrl(invokeTargeted<PreviewAutomationStatus>("open", normalizePreviewOpenInput(input))),
   ),
   preview_navigate: McpToolAccess.actsAsCaller((input) =>
     invokeTargeted<PreviewAutomationStatus>("navigate", input, input.timeoutMs),

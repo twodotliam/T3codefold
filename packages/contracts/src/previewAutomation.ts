@@ -95,6 +95,13 @@ export const PreviewAutomationStatus = Schema.Struct({
       }),
     ),
   ),
+  /**
+   * The thread's CDP browser endpoint, for driving its desktop-rendered tabs
+   * with a CDP client such as agent-browser (`--cdp <url>`) or Playwright's
+   * `connectOverCDP`. Reachable from the environment's own machine. Absent
+   * when no desktop app renders this environment's tabs.
+   */
+  cdpUrl: Schema.optional(Schema.String),
   /** Optional for compatibility with desktop hosts predating viewport sizing. */
   viewportSetting: Schema.optional(PreviewViewportSetting),
   /** Measured guest-page viewport in CSS pixels when a webview is ready. */

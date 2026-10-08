@@ -220,6 +220,29 @@ only reports what it would change.
 The browser always runs in Chrome's sandbox. Where you cannot change the host,
 set `T3CODE_SERVER_BROWSER_SANDBOX=0` for the environment to run without it.
 
+### Drive a thread's tabs with agent-browser or Playwright
+
+Each thread has a CDP address that tools such as
+[agent-browser](https://github.com/vercel-labs/agent-browser) and Playwright can
+use instead of launching their own browser. They see the thread's tabs, whether
+the desktop app shows them or they run in the background, and opening or
+closing a tab from the tool does the same in T3 Code. A tab the tool opens or
+brings to the front surfaces like one an agent opens, following your floating
+preview setting. Agents get the address on their own, and agent-browser picks it
+up without setup. To get it yourself, choose **Copy CDP URL** from a tab's menu
+in the desktop app, or run this on the host:
+
+```sh
+t3 browser cdp-url <thread-id>
+agent-browser --cdp "<url>" snapshot
+```
+
+The address points at the host machine. Through Tailscale or T3 Connect the
+same path is reachable remotely, and anyone who has the address can use the
+thread's tabs. The tab keeps its own size and color scheme, so a tool's viewport
+or device settings have no effect. Opening DevTools on a tab the desktop app
+shows disconnects it from the tool until DevTools closes.
+
 ## Connect an outside agent
 
 An agent T3 Code did not start, such as Claude Code in your own terminal, can

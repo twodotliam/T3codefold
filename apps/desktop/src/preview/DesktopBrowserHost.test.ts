@@ -119,4 +119,161 @@ describe("DesktopBrowserHost", () => {
       expect(paths).toEqual(["/srv/downloads/guid-1"]);
     }),
   );
+  it.effect("lends independent sessions whose traffic stays apart from the relay", () =>
+    Effect.gen(function* () {
+      const host = yield* DesktopBrowserHost.make;
+      const emitter = new NodeEvents.EventEmitter();
+      const sent: Array<{ method: string; params: unknown; sessionId?: string }> = [];
+      const debuggee = Object.assign(emitter, {
+        isAttached: () => true,
+        sendCommand: async (method: string, params?: unknown, sessionId?: string) => {
+          sent.push({ method, params, ...(sessionId ? { sessionId } : {}) });
+          if (method === "Target.getTargetInfo") return { targetInfo: { targetId: "GUEST" } };
+          if (method === "Target.attachToTarget") return { sessionId: "LENT" };
+          return { ok: method };
+        },
+      });
+      const tab = {
+        webContents: {} as Electron.WebContents,
+        debugger: debuggee as unknown as Electron.Debugger,
+      };
+      const events = yield* host.events.pipe(
+        Stream.map((line) => decodeEvent(new TextDecoder().decode(line))),
+        Stream.filter((event) => event.type !== "attached"),
+        Stream.take(5),
+        Stream.runCollect,
+        Effect.forkScoped,
+      );
+      yield* Effect.promise(() => new Promise((resolve) => setImmediate(resolve)));
+      host.attach(key, tab);
+      const settle = Effect.promise(() => new Promise((resolve) => setImmediate(resolve)));
+      const command = (value: Record<string, unknown>) =>
+        host.handleCommandLine(encodeJson({ ...key, ...value }));
+
+      yield* command({ type: "openSession", requestId: 1 });
+      yield* settle;
+      // The lent session is a child session on the page's own target.
+      expect(sent).toContainEqual({
+        method: "Target.attachToTarget",
+        params: { targetId: "GUEST", flatten: true },
+      });
+      yield* command({
+        type: "sessionCommand",
+        requestId: 2,
+        sessionId: "LENT",
+        method: "Runtime.evaluate",
+        params: { expression: "1" },
+      });
+      yield* command({
+        type: "sessionCommand",
+        requestId: 3,
+        sessionId: "ROOT",
+        method: "Page.close",
+      });
+      yield* settle;
+      expect(sent).toContainEqual({
+        method: "Runtime.evaluate",
+        params: { expression: "1" },
+        sessionId: "LENT",
+      });
+      expect(sent.some((entry) => entry.method === "Page.close")).toBe(false);
+
+      // Its events, and its children's, go to the server's session stream only.
+      emitter.emit("message", {}, "Target.attachedToTarget", { sessionId: "IFRAME" }, "LENT");
+      emitter.emit("message", {}, "Runtime.consoleAPICalled", { type: "log" }, "IFRAME");
+      yield* command({ type: "closeSession", sessionId: "LENT" });
+      yield* settle;
+      expect(sent).toContainEqual({
+        method: "Target.detachFromTarget",
+        params: { sessionId: "LENT" },
+      });
+
+      // Replies leave as commands finish, so only their content is fixed, not their order.
+      const received = yield* Fiber.join(events);
+      expect(received).toHaveLength(5);
+      expect(received).toEqual(
+        expect.arrayContaining([
+          {
+            type: "sessionReply",
+            ...key,
+            requestId: 1,
+            result: { sessionId: "LENT", targetId: "GUEST" },
+          },
+          { type: "sessionReply", ...key, requestId: 2, result: { ok: "Runtime.evaluate" } },
+          { type: "sessionReply", ...key, requestId: 3, error: "Unknown session." },
+          {
+            type: "sessionEvent",
+            ...key,
+            sessionId: "LENT",
+            method: "Target.attachedToTarget",
+            params: { sessionId: "IFRAME" },
+          },
+          {
+            type: "sessionEvent",
+            ...key,
+            sessionId: "IFRAME",
+            method: "Runtime.consoleAPICalled",
+            params: { type: "log" },
+          },
+        ]),
+      );
+    }).pipe(Effect.scoped),
+  );
+  it.effect("keeps a lent session's announcement from the server's Playwright", () =>
+    Effect.gen(function* () {
+      const host = yield* DesktopBrowserHost.make;
+      const emitter = new NodeEvents.EventEmitter();
+      const debuggee = Object.assign(emitter, {
+        isAttached: () => true,
+        sendCommand: async (method: string) => {
+          if (method === "Target.getTargetInfo") return { targetInfo: { targetId: "GUEST" } };
+          if (method === "Target.attachToTarget") {
+            // Chromium announces the new session on the page's root session
+            // before attachToTarget replies.
+            emitter.emit(
+              "message",
+              {},
+              "Target.attachedToTarget",
+              { sessionId: "LENT", targetInfo: { targetId: "GUEST", type: "webview" } },
+              "",
+            );
+            return { sessionId: "LENT" };
+          }
+          return {};
+        },
+      });
+      const tab = {
+        webContents: {} as Electron.WebContents,
+        debugger: debuggee as unknown as Electron.Debugger,
+      };
+      const relayed: Array<string> = [];
+      const reader = yield* host.events.pipe(
+        Stream.map((line) => decodeEvent(new TextDecoder().decode(line))),
+        Stream.filter((event) => event.type === "cdp" || event.type === "sessionReply"),
+        Stream.tap((event) =>
+          Effect.sync(() => {
+            if (event.type === "cdp") relayed.push(event.message);
+          }),
+        ),
+        Stream.filter((event) => event.type === "sessionReply"),
+        Stream.take(1),
+        Stream.runCollect,
+        Effect.forkScoped,
+      );
+      yield* Effect.promise(() => new Promise((resolve) => setImmediate(resolve)));
+      host.attach(key, tab);
+      // The server's Playwright is connected through the relay.
+      yield* host.handleCommandLine(
+        encodeJson({
+          type: "cdp",
+          ...key,
+          message: encodeJson({ id: 1, method: "Target.setAutoAttach", params: {} }),
+        }),
+      );
+      yield* host.handleCommandLine(encodeJson({ type: "openSession", ...key, requestId: 7 }));
+      const [reply] = yield* Fiber.join(reader);
+      expect(reply).toMatchObject({ requestId: 7, result: { sessionId: "LENT" } });
+      expect(relayed.some((message) => message.includes("LENT"))).toBe(false);
+    }).pipe(Effect.scoped),
+  );
 });

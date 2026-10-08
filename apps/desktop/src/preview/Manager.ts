@@ -427,6 +427,7 @@ interface BrowserControlSession {
     event: Electron.Event,
     method: string,
     params: Record<string, unknown>,
+    sessionId: string,
   ) => void;
 }
 
@@ -1160,7 +1161,15 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
               yield* Queue.offer(consoleReleases, undefined);
             }
           });
-          const onMessage: BrowserControlSession["onMessage"] = (_event, method, params) => {
+          const onMessage: BrowserControlSession["onMessage"] = (
+            _event,
+            method,
+            params,
+            sessionId,
+          ) => {
+            // Child sessions, such as ones lent to external tools, run their own
+            // screencasts and consoles; only the root session's are the app's.
+            if (sessionId) return;
             runFork(handleDebuggerMessage(method, params));
           };
           yield* Scope.addFinalizer(
