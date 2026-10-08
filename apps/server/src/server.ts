@@ -1084,7 +1084,12 @@ const layerMakeServer = Layer.unwrap(
         ),
       ),
       // Agent tools, the CLI, and provider environments all hand out the same endpoint.
-      Layer.provideMerge(PreviewCdp.layer.pipe(Layer.provide(ServerSecretStore.layer))),
+      Layer.provideMerge(
+        PreviewCdp.layer.pipe(
+          Layer.provide(ServerSecretStore.layer),
+          Layer.provide(ProcessRunner.layer),
+        ),
+      ),
       Layer.provide(layerActivation),
       Layer.provideMerge(RelayTracing.layerServerRelayBroker),
       Layer.provideMerge(layerHttpServer),

@@ -35,6 +35,7 @@ import { HttpServer } from "effect/http";
 import { ProviderWorkspaceMissingError } from "../provider/Errors.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as ProjectService from "../project/ProjectService.ts";
+import * as PreviewCdp from "../preview/PreviewCdp.ts";
 import * as McpProviderSession from "../mcp/McpProviderSession.ts";
 import * as McpSessionRegistry from "../mcp/McpSessionRegistry.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
@@ -2602,6 +2603,54 @@ it.effect("ProviderSessionManagerV2 terminal detach revokes the thread's MCP cre
     });
 
     yield* effect.pipe(Effect.provide(layerTest({ state, idleTimeoutMs: 1_000, mcpConfigs })));
+  }),
+);
+
+it.effect("ProviderSessionManagerV2 stops a deleted thread's agent-browser daemon", () =>
+  Effect.gen(function* () {
+    const state = yield* Ref.make(emptyState);
+    const mcpConfigs = yield* Ref.make<
+      ReadonlyArray<McpProviderSession.McpProviderSessionConfig | undefined>
+    >([]);
+    const closed: Array<string> = [];
+    const previewCdp = Layer.succeed(
+      PreviewCdp.PreviewCdp,
+      PreviewCdp.PreviewCdp.of({
+        urlFor: (threadId) => Effect.succeed(`ws://127.0.0.1/api/preview/cdp?thread=${threadId}`),
+        closeAgentBrowser: (threadId) => Effect.sync(() => void closed.push(threadId)),
+      }),
+    );
+    const effect = Effect.gen(function* () {
+      const eventSink = yield* EventSink.EventSinkV2;
+      const idAllocator = yield* IdAllocator.IdAllocatorV2;
+      const manager = yield* ProviderSessionManager.ProviderSessionManagerV2;
+      const now = yield* DateTime.now;
+      const threadId = ThreadId.make("thread-provider-session-manager-agent-browser");
+      const providerSessionId = yield* idAllocator.allocate.providerSession({
+        providerInstanceId: modelSelection.instanceId,
+        threadId,
+      });
+      yield* eventSink.write({
+        events: [yield* makeThreadCreatedEvent({ idAllocator, threadId, now })],
+      });
+      yield* manager.open({ threadId, providerSessionId, modelSelection, runtimePolicy });
+      assert.isDefined((yield* Ref.get(mcpConfigs)).at(-1)?.previewCdpUrl);
+      assert.deepEqual(closed, []);
+
+      yield* manager.detach({
+        providerSessionId,
+        threadId,
+        detail: "Thread deleted.",
+        revokeMcpCredential: true,
+      });
+      yield* Effect.yieldNow;
+      assert.deepEqual(closed, [threadId]);
+    });
+
+    yield* effect.pipe(
+      Effect.provide(layerTest({ state, idleTimeoutMs: 1_000, mcpConfigs })),
+      Effect.provide(previewCdp),
+    );
   }),
 );
 

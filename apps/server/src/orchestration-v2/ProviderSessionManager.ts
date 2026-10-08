@@ -338,6 +338,7 @@ export const layerWithOptions = (
        */
       const serverSettings = yield* Effect.serviceOption(ServerSettings.ServerSettingsService);
       const projectService = yield* Effect.serviceOption(ProjectService.ProjectService);
+      const previewCdp = yield* Effect.serviceOption(PreviewCdp.PreviewCdp);
       const eventSink = yield* EventSink.EventSinkV2;
       const idAllocator = yield* IdAllocator.IdAllocatorV2;
       const providerEventIngestor = yield* ProviderEventIngestor.ProviderEventIngestorV2;
@@ -533,14 +534,9 @@ export const layerWithOptions = (
                   capabilities,
                 });
                 const previewCdpUrl = browserToolsAvailable
-                  ? yield* Effect.serviceOption(PreviewCdp.PreviewCdp).pipe(
-                      Effect.flatMap(
-                        Option.match({
-                          onNone: () => Effect.succeed<string | undefined>(undefined),
-                          onSome: (previewCdp) => previewCdp.urlFor(threadId),
-                        }),
-                      ),
-                    )
+                  ? Option.isSome(previewCdp)
+                    ? yield* previewCdp.value.urlFor(threadId)
+                    : undefined
                   : undefined;
                 McpProviderSession.setMcpProviderSession({
                   ...credential.config,
@@ -561,23 +557,29 @@ export const layerWithOptions = (
         mcpCredentialId === undefined
           ? mcpSessionRegistry
               .revokeThread(threadId)
+              .pipe(Effect.andThen(clearProviderSession(threadId)))
+          : mcpSessionRegistry
+              .revokeProviderSession(mcpCredentialId)
               .pipe(
-                Effect.tap(() =>
-                  Effect.sync(() => McpProviderSession.clearMcpProviderSession(threadId)),
-                ),
-              )
-          : mcpSessionRegistry.revokeProviderSession(mcpCredentialId).pipe(
-              Effect.tap(() =>
-                Effect.sync(() => {
-                  if (
+                Effect.andThen(
+                  Effect.suspend(() =>
                     McpProviderSession.readMcpProviderSession(threadId)?.providerSessionId ===
                     mcpCredentialId
-                  ) {
-                    McpProviderSession.clearMcpProviderSession(threadId);
-                  }
-                }),
-              ),
-            );
+                      ? clearProviderSession(threadId)
+                      : Effect.void,
+                  ),
+                ),
+              );
+      /** Forgets the thread's session, and stops its agent-browser daemon now that its agents are gone. */
+      const clearProviderSession = (threadId: ThreadId) =>
+        Effect.suspend(() => {
+          const hadBrowser =
+            McpProviderSession.readMcpProviderSession(threadId)?.previewCdpUrl !== undefined;
+          McpProviderSession.clearMcpProviderSession(threadId);
+          return hadBrowser && Option.isSome(previewCdp)
+            ? previewCdp.value.closeAgentBrowser(threadId).pipe(Effect.forkDetach, Effect.asVoid)
+            : Effect.void;
+        });
 
       const publishToSubscribers = (
         subscribers: Ref.Ref<

@@ -16,16 +16,21 @@ import * as NodeHttpServerRequest from "@effect/platform-node/NodeHttpServerRequ
 import { ThreadId, type PreviewSessionSnapshot } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { HttpRouter, HttpServer, HttpServerRequest, HttpServerResponse } from "effect/http";
 import * as NetAddress from "effect/net/NetAddress";
 import * as NodeCrypto from "node:crypto";
+import * as NodeOS from "node:os";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
+import { agentBrowserSessionName } from "../mcp/McpProviderSession.ts";
+import * as ProcessRunner from "../processRunner.ts";
 
 import * as PreviewManager from "./Manager.ts";
 import * as ServerBrowser from "./ServerBrowser.ts";
@@ -68,6 +73,8 @@ export class PreviewCdp extends Context.Service<
   {
     /** The thread's endpoint on this machine's loopback. */
     readonly urlFor: (threadId: string) => Effect.Effect<string>;
+    /** Stops the thread's agent-browser daemon, if one runs, once its agents are gone. Tabs stay open. */
+    readonly closeAgentBrowser: (threadId: ThreadId) => Effect.Effect<void>;
   }
 >()("t3/preview/PreviewCdp") {}
 
@@ -91,11 +98,26 @@ const make = Effect.gen(function* () {
   const secrets = yield* Effect.context<ServerSecretStore.ServerSecretStore>();
   const key = yield* Effect.cached(readKey.pipe(Effect.provideContext(secrets)));
   const origin = loopbackOrigin(httpServer.address);
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const processRunner = yield* ProcessRunner.ProcessRunner;
   return PreviewCdp.of({
     urlFor: (threadId) =>
       key.pipe(
         Effect.map((bytes) => previewCdpUrl(origin, threadId, previewCdpToken(bytes, threadId))),
       ),
+    closeAgentBrowser: (threadId) =>
+      Effect.gen(function* () {
+        const session = agentBrowserSessionName(threadId);
+        // `close` starts a daemon when none runs, so only ask one that left its pid file.
+        const pidFile = path.join(NodeOS.homedir(), ".agent-browser", `${session}.pid`);
+        if (!(yield* fileSystem.exists(pidFile))) return;
+        yield* processRunner.run({
+          command: "agent-browser",
+          args: ["--session", session, "close"],
+          timeout: "10 seconds",
+        });
+      }).pipe(Effect.ignore),
   });
 });
 
