@@ -2821,6 +2821,22 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
       }),
     );
 
+    it.effect("places worktrees in the repository's t3.worktreeDirectory", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const path = yield* Path.Path;
+        const siblings = yield* makeTmpDir();
+        yield* git(cwd, ["config", "t3.worktreeDirectory", siblings]);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        const created = yield* driver.createWorktree(
+          { cwd, refName: initialBranch, newRefName: "lb/my-task", path: null },
+          { worktreesDirectory: "" },
+        );
+        assert.equal(created.worktree.path, path.join(siblings, "lb-my-task"));
+      }),
+    );
+
     it.effect("stops before creating the worktree when the preparation hook fails", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();

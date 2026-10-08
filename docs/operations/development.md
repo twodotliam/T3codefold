@@ -189,6 +189,10 @@ been claimed. Linked checkouts share the repository's local Git configuration, s
 apply to every checkout without committing machine-specific commands. Keep dependency installs
 in these hooks or in a project action, rather than running the same setup in both.
 
+Set `t3.worktreeDirectory` the same way to create this repository's worktrees directly in that
+folder, named after their branch, instead of under the Settings → Storage location. Use it when a
+setup hook expects worktrees beside the main checkout.
+
 ## Desktop artifacts
 
 Local artifact builds are unsigned by default and write to `release/`:

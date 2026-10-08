@@ -3352,6 +3352,21 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     const sanitizedBranch = targetBranch.replace(/\//g, "-");
     const repoName = path.basename(input.cwd);
     let worktreePath = input.path;
+    // A repository's local git config can place its worktrees beside the main checkout instead.
+    const repoWorktreesDirectory =
+      worktreePath == null ? yield* readConfigValue(input.cwd, "t3.worktreeDirectory") : null;
+    if (worktreePath == null && repoWorktreesDirectory) {
+      const directory = resolveWorktreesDirectory(repoWorktreesDirectory, worktreesDir, path);
+      if (directory === null) {
+        return yield* new GitCommandError({
+          operation: "GitVcsDriver.createWorktree",
+          command: "git worktree add",
+          cwd: input.cwd,
+          detail: `The repository's t3.worktreeDirectory "${repoWorktreesDirectory}" must be an absolute folder on this machine, not a drive root.`,
+        });
+      }
+      worktreePath = path.join(directory, sanitizedBranch);
+    }
     if (worktreePath == null) {
       const parentDir = resolveWorktreesDirectory(
         options?.worktreesDirectory ?? "",
