@@ -89,6 +89,8 @@ describe("preview CDP environment", () => {
     try {
       expect(providerSessionEnvironment({ PATH: "/usr/bin" }, threadId)).toMatchObject({
         AGENT_BROWSER_CDP: cdpUrl,
+        // Its own agent-browser daemon, so another thread's daemon cannot take its commands.
+        AGENT_BROWSER_SESSION: "t3-preview-cdp-environment-test",
       });
       expect(
         providerSessionEnvironment({ PATH: "/usr/bin" }, ThreadId.make("unrelated")),

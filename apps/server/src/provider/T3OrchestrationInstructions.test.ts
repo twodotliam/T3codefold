@@ -1,4 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
+import { ThreadId } from "@t3tools/contracts";
 
 import {
   T3_CODE_BROWSER_TOOL_INSTRUCTIONS,
@@ -91,19 +92,23 @@ describe("T3 orchestration provider instructions", () => {
   });
   describe("agent-browser tooling", () => {
     const cdpUrl = "ws://127.0.0.1:3773/api/preview/cdp?thread=t&token=secret";
-    const session = { browserTooling: "agent-browser" as const, previewCdpUrl: cdpUrl };
+    const threadId = ThreadId.make("mcp:thread-1");
+    const session = { threadId, browserTooling: "agent-browser" as const, previewCdpUrl: cdpUrl };
 
     it("gives no block unless the session prefers agent-browser and has an endpoint", () => {
       assert.isUndefined(
         t3AgentBrowserInstructionsFor(
-          { browserTooling: "t3", previewCdpUrl: cdpUrl },
+          { threadId, browserTooling: "t3", previewCdpUrl: cdpUrl },
           {
             includeUrl: true,
           },
         ),
       );
       assert.isUndefined(
-        t3AgentBrowserInstructionsFor({ browserTooling: "agent-browser" }, { includeUrl: true }),
+        t3AgentBrowserInstructionsFor(
+          { threadId, browserTooling: "agent-browser" },
+          { includeUrl: true },
+        ),
       );
       assert.isUndefined(t3AgentBrowserInstructionsFor(undefined, { includeUrl: true }));
     });
@@ -114,6 +119,8 @@ describe("T3 orchestration provider instructions", () => {
       assert.notInclude(withEnv, "token=");
       const withUrl = t3AgentBrowserInstructionsFor(session, { includeUrl: true })!;
       assert.include(withUrl, cdpUrl);
+      // A shared session name would reach whichever thread's tabs it connected to first.
+      assert.include(withUrl, 'AGENT_BROWSER_SESSION="t3-mcp-thread-1"');
     });
 
     it("replaces the preview-first block for ACP agents and resends when it changes", () => {

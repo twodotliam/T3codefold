@@ -1,4 +1,6 @@
-import type { ProviderInteractionMode } from "@t3tools/contracts";
+import type { ProviderInteractionMode, ThreadId } from "@t3tools/contracts";
+
+import { agentBrowserSessionName } from "../mcp/McpProviderSession.ts";
 
 export const T3_CODE_ORCHESTRATION_INSTRUCTIONS = `
 
@@ -45,7 +47,7 @@ For browser work, first call \`preview_status\`. If no automation-capable previe
 
 Do not switch to global browser skills, Chrome, Node REPL browser automation, standalone Playwright, or agent-browser merely because the preview is initially closed or a first call fails. Use an alternative browser system only when the T3 preview tools are absent, the user explicitly requests another browser, or \`preview_open\` returns an explicit unsupported/unavailable error. A failed T3 preview tool call should be inspected and retried with corrected arguments when the error is actionable.
 
-When the user or the repository's own workflow calls for a CDP client such as agent-browser or Playwright, drive this thread's preview tabs with it instead of launching a separate browser: \`preview_status\` reports the thread's endpoint as \`cdpUrl\`, and \`AGENT_BROWSER_CDP\` carries it when set (\`agent-browser --cdp "$AGENT_BROWSER_CDP" snapshot\`, or Playwright's \`chromium.connectOverCDP(cdpUrl)\`). Its targets are the thread's tabs; opening a target opens a tab the user sees. The preview keeps its own viewport size and color scheme.
+When the user or the repository's own workflow calls for a CDP client such as agent-browser or Playwright, drive this thread's preview tabs with it instead of launching a separate browser. \`preview_status\` reports the thread's endpoint as \`cdpUrl\` (Playwright: \`chromium.connectOverCDP(cdpUrl)\`). When \`AGENT_BROWSER_CDP\` and \`AGENT_BROWSER_SESSION\` are set, agent-browser already targets this thread: run it plainly (\`agent-browser snapshot -i\`) without \`--cdp\`, \`--session\`, or \`connect\`, because another session can stay connected to a different thread's tabs. Otherwise export both, using \`cdpUrl\` and a session name unique to this thread. Its targets are the thread's tabs; opening a target opens a tab the user sees. Use one tool per task rather than mixing it with \`preview_*\`. The preview keeps its own viewport size and color scheme.
 `;
 
 /**
@@ -54,27 +56,40 @@ When the user or the repository's own workflow calls for a CDP client such as ag
  * `AGENT_BROWSER_CDP` pass no URL; the rest pass the thread's endpoint, which
  * the agent then gives agent-browser with `--cdp`.
  */
-export function t3AgentBrowserInstructions(cdpUrl?: string): string {
+export function t3AgentBrowserInstructions(connection?: {
+  readonly cdpUrl: string;
+  readonly session: string;
+}): string {
   const connect =
-    cdpUrl === undefined
-      ? "agent-browser is already pointed at this thread's tabs through `AGENT_BROWSER_CDP`; do not pass `--cdp` or launch a separate browser."
-      : `Point agent-browser at this thread's tabs with \`export AGENT_BROWSER_CDP="${cdpUrl}"\` (or pass \`--cdp\` with that URL on every command); do not launch a separate browser.`;
+    connection === undefined
+      ? "agent-browser is already pointed at this thread's tabs through `AGENT_BROWSER_CDP` and `AGENT_BROWSER_SESSION`; do not pass `--cdp` or `--session`, run `connect`, or launch a separate browser."
+      : `Point agent-browser at this thread's tabs with \`export AGENT_BROWSER_CDP="${connection.cdpUrl}" AGENT_BROWSER_SESSION="${connection.session}"\` in the shell you run it from; do not launch a separate browser. Keep that session name: another session could still be connected to a different thread.`;
   return `## T3 Code browser: agent-browser
 
-You are running inside T3 Code. For browser navigation, inspection, interaction, screenshots, recordings, and console or network logs, use the \`agent-browser\` CLI (\`npx agent-browser\` if it is not installed). ${connect} Its tabs are this thread's T3 browser tabs, shared with the user: a tab you open appears in their browser panel. Start with \`agent-browser snapshot -i\` and prefer its refs over coordinates. The preview keeps its own viewport size and color scheme, so viewport and device emulation have no effect.
+You are running inside T3 Code. For browser navigation, inspection, interaction, screenshots, recordings, and console or network logs, use the \`agent-browser\` CLI (\`npx agent-browser\` if it is not installed). ${connect} Its tabs are this thread's T3 browser tabs, shared with the user: a tab you open appears in their browser panel. Start with \`agent-browser tab list\` and \`agent-browser snapshot -i\`, prefer snapshot refs over coordinates, and take a fresh snapshot after navigating or switching tabs, since refs go stale. The preview keeps its own viewport size and color scheme, so viewport and device emulation have no effect.
 
-The T3 \`preview_*\` tools reach the same tabs and remain available, for example to attach a recording to the thread; prefer agent-browser for everything else.`;
+The T3 \`preview_*\` tools reach the same tabs and remain available, for example to attach a recording to the thread; prefer agent-browser for everything else, and do not mix the two within one task.`;
 }
 
 /** The agent-browser block for a session set to that tooling, or undefined. */
 export function t3AgentBrowserInstructionsFor(
-  session: { readonly browserTooling?: string; readonly previewCdpUrl?: string } | undefined,
+  session:
+    | {
+        readonly threadId: ThreadId;
+        readonly browserTooling?: string;
+        readonly previewCdpUrl?: string;
+      }
+    | undefined,
   options: { readonly includeUrl: boolean },
 ): string | undefined {
   if (session?.browserTooling !== "agent-browser" || session.previewCdpUrl === undefined) {
     return undefined;
   }
-  return t3AgentBrowserInstructions(options.includeUrl ? session.previewCdpUrl : undefined);
+  return t3AgentBrowserInstructions(
+    options.includeUrl
+      ? { cdpUrl: session.previewCdpUrl, session: agentBrowserSessionName(session.threadId) }
+      : undefined,
+  );
 }
 
 const T3_CODE_ACP_DEFAULT_MODE_INSTRUCTIONS = `## T3 Code interaction mode: Default

@@ -73,6 +73,15 @@ function clearAllMcpProviderSessions(): void {
 }
 
 /**
+ * The agent-browser session a thread's agents use. agent-browser keeps one
+ * daemon per session name and connects it once, so without a per-thread name
+ * every thread's commands would reach whichever thread connected first.
+ */
+export function agentBrowserSessionName(threadId: ThreadId): string {
+  return `t3-${threadId.replace(/[^A-Za-z0-9_-]/g, "-")}`;
+}
+
+/**
  * The `t3 work` CLI's credential: the thread's own revocable MCP authority,
  * never local admin auth. Empty when the thread has no MCP session.
  */
@@ -82,7 +91,12 @@ export function workCliEnvironment(threadId: ThreadId): Readonly<Record<string, 
     ? {
         T3_WORK_ENDPOINT: session.endpoint,
         T3_WORK_AUTHORIZATION: session.authorizationHeader,
-        ...(session.previewCdpUrl ? { AGENT_BROWSER_CDP: session.previewCdpUrl } : {}),
+        ...(session.previewCdpUrl
+          ? {
+              AGENT_BROWSER_CDP: session.previewCdpUrl,
+              AGENT_BROWSER_SESSION: agentBrowserSessionName(threadId),
+            }
+          : {}),
       }
     : {};
 }
