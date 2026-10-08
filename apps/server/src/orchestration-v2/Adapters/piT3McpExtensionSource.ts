@@ -15,6 +15,8 @@ export const PI_T3_MCP_EXTENSION_FILENAME = "pi-t3-mcp-extension.ts";
 export const T3_MCP_URL_ENV = "T3_MCP_URL";
 export const T3_MCP_BEARER_ENV = "T3_MCP_BEARER_TOKEN";
 export const T3_PI_RUNTIME_MODE_ENV = "T3_PI_RUNTIME_MODE";
+/** The agent-browser block, set when the session prefers agent-browser tooling. */
+export const T3_PI_BROWSER_INSTRUCTIONS_ENV = "T3_PI_BROWSER_INSTRUCTIONS";
 
 /**
  * Pi tools whose confirmations the bridge raises as file-change approvals.
@@ -30,6 +32,7 @@ const URL_ENV = ${JSON.stringify(T3_MCP_URL_ENV)};
 const TOKEN_ENV = ${JSON.stringify(T3_MCP_BEARER_ENV)};
 const RUNTIME_MODE_ENV = ${JSON.stringify(T3_PI_RUNTIME_MODE_ENV)};
 const ORCHESTRATION_INSTRUCTIONS = ${JSON.stringify(T3_CODE_ORCHESTRATION_INSTRUCTIONS.trim())};
+const BROWSER_INSTRUCTIONS_ENV = ${JSON.stringify(T3_PI_BROWSER_INSTRUCTIONS_ENV)};
 const PROTOCOL = "2025-06-18";
 const READ_ONLY_TOOLS = new Set(["read", "grep", "find", "ls"]);
 const FILE_CHANGE_TOOLS = new Set(${JSON.stringify(PI_FILE_CHANGE_TOOLS)});
@@ -324,8 +327,13 @@ export default async function t3McpExtension(pi: ExtensionAPI) {
   // Deliver orchestration guidance through pi's real system-prompt channel.
   // Wrapping the first user message instead would stop it from starting
   // with "/" and silently break slash-command expansion.
+  const browserInstructions = process.env[BROWSER_INSTRUCTIONS_ENV];
   pi.on("before_agent_start", (event) => ({
-    systemPrompt: event.systemPrompt + "\\n\\n" + ORCHESTRATION_INSTRUCTIONS,
+    systemPrompt:
+      event.systemPrompt +
+      "\\n\\n" +
+      ORCHESTRATION_INSTRUCTIONS +
+      (browserInstructions ? "\\n\\n" + browserInstructions : ""),
   }));
 }
 `;

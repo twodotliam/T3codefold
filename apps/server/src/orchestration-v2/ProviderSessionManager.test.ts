@@ -613,6 +613,7 @@ function runBrowserAccessScenario(input: {
   readonly enableAgentBrowserAccess: boolean;
   readonly projectOverride: boolean;
   readonly deviceOverride?: boolean;
+  readonly toolingOverride?: "t3" | "agent-browser";
   readonly createThread?: boolean;
   readonly projectExists?: boolean;
 }) {
@@ -664,6 +665,9 @@ function runBrowserAccessScenario(input: {
                 ...(input.deviceOverride === undefined
                   ? {}
                   : { enableAgentDeviceAccess: input.deviceOverride }),
+                ...(input.toolingOverride === undefined
+                  ? {}
+                  : { agentBrowserTooling: input.toolingOverride }),
               },
             },
           }),
@@ -1882,6 +1886,28 @@ it.effect("ProviderSessionManagerV2 honors a project browser-access opt-in", () 
       projectOverride: true,
     });
     assert.isDefined(captured);
+    assert.equal(captured?.browserToolsAvailable, true);
+  }),
+);
+
+it.effect("ProviderSessionManagerV2 prefers T3's browser tools by default", () =>
+  Effect.gen(function* () {
+    const captured = yield* runBrowserAccessScenario({
+      enableAgentBrowserAccess: true,
+      projectOverride: true,
+    });
+    assert.equal(captured?.browserTooling, "t3");
+  }),
+);
+
+it.effect("ProviderSessionManagerV2 honors a project's agent-browser tooling", () =>
+  Effect.gen(function* () {
+    const captured = yield* runBrowserAccessScenario({
+      enableAgentBrowserAccess: true,
+      projectOverride: true,
+      toolingOverride: "agent-browser",
+    });
+    assert.equal(captured?.browserTooling, "agent-browser");
     assert.equal(captured?.browserToolsAvailable, true);
   }),
 );

@@ -1,6 +1,7 @@
 import * as KeyedLock from "@t3tools/shared/KeyedLock";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import {
+  type AgentBrowserTooling,
   ModelSelection,
   OrchestrationV2DomainEvent,
   OrchestrationV2ProviderSession,
@@ -343,7 +344,8 @@ export const layerWithOptions = (
       const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
       const agentAccessSettings = Effect.fn("ProviderSessionManagerV2.agentAccessSettings")(
         function* (threadId: ThreadId) {
-          if (Option.isNone(serverSettings)) return { browser: true, device: false };
+          if (Option.isNone(serverSettings))
+            return { browser: true, device: false, browserTooling: "t3" as AgentBrowserTooling };
           return yield* Effect.gen(function* () {
             const settings = yield* serverSettings.value.getSettings;
             const thread = yield* projectionStore.getThread(threadId);
@@ -354,7 +356,10 @@ export const layerWithOptions = (
             const deviceOverridden = entries.some(
               (entry) => entry.enableAgentDeviceAccess !== undefined,
             );
-            if (browserOverridden || deviceOverridden) {
+            const toolingOverridden = entries.some(
+              (entry) => entry.agentBrowserTooling !== undefined,
+            );
+            if (browserOverridden || deviceOverridden || toolingOverridden) {
               const project = Option.isSome(projectService)
                 ? yield* projectService.value.getById(thread.projectId)
                 : Option.none();
@@ -362,19 +367,27 @@ export const layerWithOptions = (
                 return {
                   browser: browserOverridden ? false : settings.enableAgentBrowserAccess,
                   device: deviceOverridden ? false : settings.enableAgentDeviceAccess,
+                  browserTooling: settings.agentBrowserTooling,
                 };
             }
             const effective = resolveProjectSettings(settings, thread.projectId).settings;
             return {
               browser: effective.enableAgentBrowserAccess,
               device: effective.enableAgentDeviceAccess,
+              browserTooling: effective.agentBrowserTooling,
             };
           }).pipe(
             Effect.catch((cause) =>
               Effect.logWarning(
                 "Could not resolve agent access; withholding browser and device tools.",
                 { threadId, cause },
-              ).pipe(Effect.as({ browser: false, device: false })),
+              ).pipe(
+                Effect.as({
+                  browser: false,
+                  device: false,
+                  browserTooling: "t3" as AgentBrowserTooling,
+                }),
+              ),
             ),
           );
         },
@@ -470,8 +483,11 @@ export const layerWithOptions = (
                 // the credential it started with, so a thread that detaches and
                 // re-attaches across a workspace handoff must come back to the
                 // same token or the process's tool calls fail auth.
-                const { browser: browserToolsAvailable, device: deviceToolsAvailable } =
-                  yield* agentAccessSettings(threadId);
+                const {
+                  browser: browserToolsAvailable,
+                  device: deviceToolsAvailable,
+                  browserTooling,
+                } = yield* agentAccessSettings(threadId);
                 const capabilities = new Set<
                   import("../mcp/McpInvocationContext.ts").McpCapability
                 >(["orchestration", "worktree", "pull-requests"]);
@@ -501,7 +517,9 @@ export const layerWithOptions = (
                     // A flipped browser-access setting must not survive through
                     // credential reuse: rotate so the new scope reflects it.
                     resolved.capabilities.has("preview") === browserToolsAvailable &&
-                    resolved.capabilities.has("device") === deviceToolsAvailable
+                    resolved.capabilities.has("device") === deviceToolsAvailable &&
+                    // The tooling choice shapes the session's instructions the same way.
+                    (existing.browserTooling ?? "t3") === browserTooling
                   ) {
                     return { mcpCredentialId: existing.providerSessionId, issued: false };
                   }
@@ -527,6 +545,7 @@ export const layerWithOptions = (
                 McpProviderSession.setMcpProviderSession({
                   ...credential.config,
                   ...(previewCdpUrl === undefined ? {} : { previewCdpUrl }),
+                  browserTooling,
                 });
                 reserveMcpCredential(threadId, credential.config.providerSessionId);
                 return { mcpCredentialId: credential.config.providerSessionId, issued: true };

@@ -1,8 +1,10 @@
 import { assert, describe, it } from "@effect/vitest";
 
 import {
+  T3_CODE_BROWSER_TOOL_INSTRUCTIONS,
   T3_CODE_ORCHESTRATION_INSTRUCTIONS,
   t3AcpPromptWithInstructions,
+  t3AgentBrowserInstructionsFor,
   t3OrchestrationPromptForFirstRun,
   t3OrchestrationSystemPrompt,
 } from "./T3OrchestrationInstructions.ts";
@@ -86,5 +88,52 @@ describe("T3 orchestration provider instructions", () => {
     assert.include(withoutMcp, "T3 Code interaction mode: Default");
     assert.notInclude(withoutMcp, "T3 Code collaborative browser");
     assert.notInclude(withoutMcp, "T3 Code orchestration");
+  });
+  describe("agent-browser tooling", () => {
+    const cdpUrl = "ws://127.0.0.1:3773/api/preview/cdp?thread=t&token=secret";
+    const session = { browserTooling: "agent-browser" as const, previewCdpUrl: cdpUrl };
+
+    it("gives no block unless the session prefers agent-browser and has an endpoint", () => {
+      assert.isUndefined(
+        t3AgentBrowserInstructionsFor(
+          { browserTooling: "t3", previewCdpUrl: cdpUrl },
+          {
+            includeUrl: true,
+          },
+        ),
+      );
+      assert.isUndefined(
+        t3AgentBrowserInstructionsFor({ browserTooling: "agent-browser" }, { includeUrl: true }),
+      );
+      assert.isUndefined(t3AgentBrowserInstructionsFor(undefined, { includeUrl: true }));
+    });
+
+    it("names the URL only for providers without AGENT_BROWSER_CDP", () => {
+      const withEnv = t3AgentBrowserInstructionsFor(session, { includeUrl: false })!;
+      assert.include(withEnv, "already pointed at this thread's tabs through `AGENT_BROWSER_CDP`");
+      assert.notInclude(withEnv, "token=");
+      const withUrl = t3AgentBrowserInstructionsFor(session, { includeUrl: true })!;
+      assert.include(withUrl, cdpUrl);
+    });
+
+    it("replaces the preview-first block for ACP agents and resends when it changes", () => {
+      const agentBrowser = t3AgentBrowserInstructionsFor(session, { includeUrl: true });
+      const state = { interactionMode: "default" as const, hasT3Mcp: true };
+      const prompt = t3AcpPromptWithInstructions({
+        prompt: "Check the page.",
+        state: { ...state, agentBrowserInstructions: agentBrowser },
+        previousState: state,
+      });
+      assert.include(prompt, "T3 Code browser: agent-browser");
+      assert.notInclude(prompt, T3_CODE_BROWSER_TOOL_INSTRUCTIONS.trim());
+    });
+
+    it("adds the block after the orchestration instructions for system prompts", () => {
+      const agentBrowser = t3AgentBrowserInstructionsFor(session, { includeUrl: false });
+      const systemPrompt = t3OrchestrationSystemPrompt(true, agentBrowser)!;
+      assert.include(systemPrompt, T3_CODE_ORCHESTRATION_INSTRUCTIONS.trim());
+      assert.include(systemPrompt, "T3 Code browser: agent-browser");
+      assert.strictEqual(t3OrchestrationSystemPrompt(true), T3_CODE_ORCHESTRATION_INSTRUCTIONS);
+    });
   });
 });

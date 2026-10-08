@@ -48,6 +48,35 @@ Do not switch to global browser skills, Chrome, Node REPL browser automation, st
 When the user or the repository's own workflow calls for a CDP client such as agent-browser or Playwright, drive this thread's preview tabs with it instead of launching a separate browser: \`preview_status\` reports the thread's endpoint as \`cdpUrl\`, and \`AGENT_BROWSER_CDP\` carries it when set (\`agent-browser --cdp "$AGENT_BROWSER_CDP" snapshot\`, or Playwright's \`chromium.connectOverCDP(cdpUrl)\`). Its targets are the thread's tabs; opening a target opens a tab the user sees. The preview keeps its own viewport size and color scheme.
 `;
 
+/**
+ * The browser block for sessions set to agent-browser tooling, which replaces
+ * the preview-first block above. Providers whose processes receive
+ * `AGENT_BROWSER_CDP` pass no URL; the rest pass the thread's endpoint, which
+ * the agent then gives agent-browser with `--cdp`.
+ */
+export function t3AgentBrowserInstructions(cdpUrl?: string): string {
+  const connect =
+    cdpUrl === undefined
+      ? "agent-browser is already pointed at this thread's tabs through `AGENT_BROWSER_CDP`; do not pass `--cdp` or launch a separate browser."
+      : `Point agent-browser at this thread's tabs with \`export AGENT_BROWSER_CDP="${cdpUrl}"\` (or pass \`--cdp\` with that URL on every command); do not launch a separate browser.`;
+  return `## T3 Code browser: agent-browser
+
+You are running inside T3 Code. For browser navigation, inspection, interaction, screenshots, recordings, and console or network logs, use the \`agent-browser\` CLI (\`npx agent-browser\` if it is not installed). ${connect} Its tabs are this thread's T3 browser tabs, shared with the user: a tab you open appears in their browser panel. Start with \`agent-browser snapshot -i\` and prefer its refs over coordinates. The preview keeps its own viewport size and color scheme, so viewport and device emulation have no effect.
+
+The T3 \`preview_*\` tools reach the same tabs and remain available, for example to attach a recording to the thread; prefer agent-browser for everything else.`;
+}
+
+/** The agent-browser block for a session set to that tooling, or undefined. */
+export function t3AgentBrowserInstructionsFor(
+  session: { readonly browserTooling?: string; readonly previewCdpUrl?: string } | undefined,
+  options: { readonly includeUrl: boolean },
+): string | undefined {
+  if (session?.browserTooling !== "agent-browser" || session.previewCdpUrl === undefined) {
+    return undefined;
+  }
+  return t3AgentBrowserInstructions(options.includeUrl ? session.previewCdpUrl : undefined);
+}
+
 const T3_CODE_ACP_DEFAULT_MODE_INSTRUCTIONS = `## T3 Code interaction mode: Default
 
 Prefer making reasonable assumptions and carrying out the user's request. Ask a concise question only when a missing user decision would materially change the result. Treat this mode as active until T3 Code supplies a different interaction-mode instruction.`;
@@ -59,6 +88,8 @@ Investigate with read-only actions and do not edit files or otherwise execute th
 export interface T3AcpInstructionState {
   readonly interactionMode: ProviderInteractionMode;
   readonly hasT3Mcp: boolean;
+  /** Replaces the preview-first browser block when the session prefers agent-browser. */
+  readonly agentBrowserInstructions?: string | undefined;
 }
 
 /**
@@ -74,7 +105,8 @@ export function t3AcpPromptWithInstructions(input: {
   if (input.prompt.trimStart().startsWith("/")) return input.prompt;
   if (
     input.previousState?.interactionMode === input.state.interactionMode &&
-    input.previousState.hasT3Mcp === input.state.hasT3Mcp
+    input.previousState.hasT3Mcp === input.state.hasT3Mcp &&
+    input.previousState.agentBrowserInstructions === input.state.agentBrowserInstructions
   ) {
     return input.prompt;
   }
@@ -83,7 +115,10 @@ export function t3AcpPromptWithInstructions(input: {
       ? T3_CODE_ACP_PLAN_MODE_INSTRUCTIONS
       : T3_CODE_ACP_DEFAULT_MODE_INSTRUCTIONS,
     ...(input.state.hasT3Mcp
-      ? [T3_CODE_BROWSER_TOOL_INSTRUCTIONS.trim(), T3_CODE_ORCHESTRATION_INSTRUCTIONS.trim()]
+      ? [
+          (input.state.agentBrowserInstructions ?? T3_CODE_BROWSER_TOOL_INSTRUCTIONS).trim(),
+          T3_CODE_ORCHESTRATION_INSTRUCTIONS.trim(),
+        ]
       : []),
   ];
   return `<t3_code_instructions>\n${instructions.join("\n\n")}\n</t3_code_instructions>\n\n<user_request>\n${input.prompt}\n</user_request>`;
@@ -94,20 +129,32 @@ export function t3AcpPromptWithInstructions(input: {
  * context in the first prompt. Keep the wrapper explicit so it cannot be
  * mistaken for text authored by the user.
  */
-function prependT3OrchestrationInstructions(prompt: string): string {
-  return `<t3_code_orchestration_instructions>${T3_CODE_ORCHESTRATION_INSTRUCTIONS.trim()}</t3_code_orchestration_instructions>\n\n<user_request>\n${prompt}\n</user_request>`;
+function prependT3OrchestrationInstructions(prompt: string, agentBrowser?: string): string {
+  const instructions = [T3_CODE_ORCHESTRATION_INSTRUCTIONS.trim(), agentBrowser?.trim()]
+    .filter(Boolean)
+    .join("\n\n");
+  return `<t3_code_orchestration_instructions>${instructions}</t3_code_orchestration_instructions>\n\n<user_request>\n${prompt}\n</user_request>`;
 }
 
 export function t3OrchestrationPromptForFirstRun(input: {
   readonly prompt: string;
   readonly runOrdinal: number;
   readonly hasT3Mcp: boolean;
+  /** The agent-browser block when the session prefers agent-browser tooling. */
+  readonly agentBrowserInstructions?: string | undefined;
 }): string {
   return input.runOrdinal === 1 && input.hasT3Mcp
-    ? prependT3OrchestrationInstructions(input.prompt)
+    ? prependT3OrchestrationInstructions(input.prompt, input.agentBrowserInstructions)
     : input.prompt;
 }
 
-export function t3OrchestrationSystemPrompt(hasT3Mcp: boolean): string | undefined {
-  return hasT3Mcp ? T3_CODE_ORCHESTRATION_INSTRUCTIONS : undefined;
+export function t3OrchestrationSystemPrompt(
+  hasT3Mcp: boolean,
+  /** The agent-browser block when the session prefers agent-browser tooling. */
+  agentBrowserInstructions?: string,
+): string | undefined {
+  if (!hasT3Mcp) return undefined;
+  return agentBrowserInstructions === undefined
+    ? T3_CODE_ORCHESTRATION_INSTRUCTIONS
+    : `${T3_CODE_ORCHESTRATION_INSTRUCTIONS}\n\n${agentBrowserInstructions}\n`;
 }

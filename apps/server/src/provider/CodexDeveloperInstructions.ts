@@ -14,6 +14,8 @@ The \`t3-code\` MCP server also exposes \`device_*\` tools for iOS Simulators an
 export interface T3CodeToolAvailability {
   readonly browser: boolean;
   readonly device: boolean;
+  /** Replaces the preview-first browser block when the session prefers agent-browser. */
+  readonly agentBrowserInstructions?: string | undefined;
 }
 
 const normalizeAvailability = (
@@ -31,7 +33,7 @@ const normalizeAvailability = (
 const toolInstructions = (availability: boolean | T3CodeToolAvailability): string => {
   const tools = normalizeAvailability(availability);
   return [
-    tools.browser ? T3_CODE_BROWSER_TOOL_INSTRUCTIONS : "",
+    tools.browser ? (tools.agentBrowserInstructions ?? T3_CODE_BROWSER_TOOL_INSTRUCTIONS) : "",
     tools.device ? T3_CODE_DEVICE_TOOL_INSTRUCTIONS : "",
   ]
     .filter(Boolean)

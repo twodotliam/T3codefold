@@ -3,12 +3,14 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 
 import type { McpProviderSessionConfig } from "../../mcp/McpProviderSession.ts";
+import { t3AgentBrowserInstructionsFor } from "../../provider/T3OrchestrationInstructions.ts";
 import {
   PI_T3_MCP_EXTENSION_FILENAME,
   PI_T3_MCP_EXTENSION_SOURCE,
   T3_MCP_BEARER_ENV,
   T3_MCP_URL_ENV,
   T3_PI_RUNTIME_MODE_ENV,
+  T3_PI_BROWSER_INSTRUCTIONS_ENV,
 } from "./piT3McpExtensionSource.ts";
 
 const RESERVED_PI_LAUNCH_ARGUMENTS = new Set([
@@ -263,6 +265,9 @@ export function buildPiRpcLaunch(input: {
 } {
   const hasT3Extension = input.disableExtensions !== true && input.extensionPath !== undefined;
   const hasT3Mcp = hasT3Extension && input.mcpSession !== undefined;
+  const agentBrowserInstructions = t3AgentBrowserInstructionsFor(input.mcpSession, {
+    includeUrl: false,
+  });
   const extensionSafeArgs =
     input.disableExtensions === true
       ? withoutExplicitExtensions(input.launchArgs)
@@ -308,6 +313,10 @@ export function buildPiRpcLaunch(input: {
             [T3_MCP_BEARER_ENV]: bearerTokenFromAuthorizationHeader(
               input.mcpSession.authorizationHeader,
             ),
+            // Pi receives AGENT_BROWSER_CDP itself, so the block needs no URL.
+            ...(agentBrowserInstructions === undefined
+              ? {}
+              : { [T3_PI_BROWSER_INSTRUCTIONS_ENV]: agentBrowserInstructions }),
           }
         : {}),
     },

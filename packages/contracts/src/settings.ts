@@ -1079,6 +1079,15 @@ export const SourceControlWritingStyleSettings = Schema.Struct({
 });
 export type SourceControlWritingStyleSettings = typeof SourceControlWritingStyleSettings.Type;
 
+/**
+ * Which browser tooling agents are told to use for the thread's preview tabs:
+ * T3's own `preview_*` tools, or agent-browser through the thread's CDP
+ * endpoint. Both reach the same tabs and the `preview_*` tools stay attached
+ * either way; this only changes what the injected instructions prefer.
+ */
+export const AgentBrowserTooling = Schema.Literals(["t3", "agent-browser"]);
+export type AgentBrowserTooling = typeof AgentBrowserTooling.Type;
+
 export const BranchNamingMode = Schema.Literals(["static", "semantic", "custom"]);
 export type BranchNamingMode = typeof BranchNamingMode.Type;
 
@@ -1174,6 +1183,7 @@ export const PROJECT_SCOPED_SERVER_SETTING_KEYS = [
   "defaultAutoPull",
   "defaultProjectScripts",
   "enableAgentBrowserAccess",
+  "agentBrowserTooling",
   "enableAgentDeviceAccess",
   "textGenerationModelSelection",
   "sourceControlWriterModelSelection",
@@ -1205,6 +1215,7 @@ export const ProjectSettingsOverrides = Schema.Struct({
   defaultAutoPull: Schema.optionalKey(Schema.Boolean),
   defaultProjectScripts: Schema.optionalKey(Schema.Array(ProjectScript)),
   enableAgentBrowserAccess: Schema.optionalKey(Schema.Boolean),
+  agentBrowserTooling: ForwardCompatibleOptional(AgentBrowserTooling),
   enableAgentDeviceAccess: Schema.optionalKey(Schema.Boolean),
   textGenerationModelSelection: Schema.optionalKey(ModelSelection),
   sourceControlWriterModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
@@ -1292,6 +1303,9 @@ export const ServerSettings = Schema.Struct({
   enableAgentBrowserAccess: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   projectAgentBrowserAccessOverrides: Schema.Record(ProjectId, Schema.Boolean).pipe(
     Schema.withDecodingDefault(Effect.succeed({})),
+  ),
+  agentBrowserTooling: AgentBrowserTooling.pipe(
+    Schema.withDecodingDefault(Effect.succeed("t3" as const)),
   ),
   defaultAutoPull: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   defaultProjectScripts: Schema.Array(ProjectScript).pipe(
@@ -1680,6 +1694,7 @@ export const ServerSettingsPatch = Schema.Struct({
   enableProviderUpdateChecks: Schema.optionalKey(Schema.Boolean),
   continueThreadsAfterServerUpdate: Schema.optionalKey(Schema.Boolean),
   enableAgentBrowserAccess: Schema.optionalKey(Schema.Boolean),
+  agentBrowserTooling: Schema.optionalKey(AgentBrowserTooling),
   projectAgentBrowserAccessOverrides: Schema.optionalKey(
     Schema.Record(ProjectId, Schema.NullOr(Schema.Boolean)),
   ),

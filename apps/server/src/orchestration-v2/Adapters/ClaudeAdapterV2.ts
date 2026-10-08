@@ -113,7 +113,10 @@ import {
 } from "../../provider/claudeUsageLimits.ts";
 import type { ServerProviderShape } from "../../provider/ServerProvider.ts";
 import { mergeProviderInstanceEnvironment } from "../../provider/ProviderInstanceEnvironment.ts";
-import { T3_CODE_ORCHESTRATION_INSTRUCTIONS } from "../../provider/T3OrchestrationInstructions.ts";
+import {
+  T3_CODE_ORCHESTRATION_INSTRUCTIONS,
+  t3AgentBrowserInstructionsFor,
+} from "../../provider/T3OrchestrationInstructions.ts";
 import { buildRuntimeInstructions } from "../../provider/RuntimeInstructions.ts";
 import { mcpToolPresentation, normalizeMcpText } from "../../provider/McpToolPresentation.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
@@ -818,6 +821,8 @@ export function makeClaudeQueryOptions(input: {
   readonly sdkSettings?: string | ClaudeSdkSettings;
   readonly environment?: NodeJS.ProcessEnv;
   readonly mcpServers?: ClaudeQueryOptions["mcpServers"];
+  /** The agent-browser block when the session prefers agent-browser tooling. */
+  readonly agentBrowserInstructions?: string | undefined;
   readonly tools?: ClaudeAgentSdkQueryTools;
   readonly allowedTools?: ReadonlyArray<string>;
   readonly disallowedTools?: ReadonlyArray<string>;
@@ -910,7 +915,10 @@ export function makeClaudeQueryOptions(input: {
       preset: "claude_code" as const,
       append:
         buildRuntimeInstructions({ harness: "Claude Code" }) +
-        (input.mcpServers === undefined ? "" : T3_CODE_ORCHESTRATION_INSTRUCTIONS),
+        (input.mcpServers === undefined ? "" : T3_CODE_ORCHESTRATION_INSTRUCTIONS) +
+        (input.mcpServers === undefined || input.agentBrowserInstructions === undefined
+          ? ""
+          : `\n${input.agentBrowserInstructions}\n`),
     },
     ...(Object.keys(extraArgs).length === 0 ? {} : { extraArgs }),
   };
@@ -7135,6 +7143,11 @@ export function makeClaudeAdapterV2(
             environment: McpProviderSession.providerSessionEnvironment(
               adapterOptions.environment,
               turnInput.threadId,
+            ),
+            // The process receives AGENT_BROWSER_CDP, so the block needs no URL.
+            agentBrowserInstructions: t3AgentBrowserInstructionsFor(
+              McpProviderSession.readMcpProviderSession(turnInput.threadId),
+              { includeUrl: false },
             ),
             tools: queryPolicy.tools ?? CLAUDE_CODE_PRESET_TOOLS,
             ...mcpOverrides,

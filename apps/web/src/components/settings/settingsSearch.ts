@@ -704,6 +704,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["allow disable enable open drive preview tools sessions project override"],
   },
   {
+    id: "agent-browser-tooling",
+    title: "Use agent-browser",
+    to: "/settings/integrations",
+    scope: "project-defaults",
+    searchTerms: ["agent-browser cdp playwright cli browser tooling preview tools instructions"],
+  },
+  {
     id: "device-hosts",
     title: "Device hosts",
     to: "/settings/integrations",

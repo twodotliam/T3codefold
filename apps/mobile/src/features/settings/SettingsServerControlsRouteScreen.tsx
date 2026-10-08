@@ -56,7 +56,7 @@ const PAGE_PROJECT_KEYS: Record<SettingsPage, readonly ProjectScopedServerSettin
     "branchNamePrefix",
     "branchNameInstructions",
   ],
-  "agent-behavior": ["responseStreamingMode", "enableAgentBrowserAccess"],
+  "agent-behavior": ["responseStreamingMode", "enableAgentBrowserAccess", "agentBrowserTooling"],
   maintenance: ["continueThreadsAfterServerUpdate"],
 };
 
@@ -398,6 +398,23 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
                       value={uniform("enableAgentBrowserAccess")}
                       disabled={disabledFor("enableAgentBrowserAccess")}
                       onValueChange={(value) => write({ enableAgentBrowserAccess: value })}
+                    />
+                    <SettingsSwitchRow
+                      icon="terminal"
+                      label="Use agent-browser"
+                      subtitle="Tell agents to drive the browser with the agent-browser CLI instead of T3's browser tools. Both reach the same tabs."
+                      value={
+                        uniform("agentBrowserTooling") === null
+                          ? null
+                          : uniform("agentBrowserTooling") === "agent-browser"
+                      }
+                      disabled={
+                        disabledFor("agentBrowserTooling") ||
+                        uniform("enableAgentBrowserAccess") === false
+                      }
+                      onValueChange={(value) =>
+                        write({ agentBrowserTooling: value ? "agent-browser" : "t3" })
+                      }
                     />
                   </SettingsSection>
                 </>

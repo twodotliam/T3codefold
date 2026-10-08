@@ -229,7 +229,9 @@ the desktop app shows them or they run in the background, and opening or
 closing a tab from the tool does the same in T3 Code. A tab the tool opens or
 brings to the front surfaces like one an agent opens, following your floating
 preview setting. Agents get the address on their own, and agent-browser picks it
-up without setup. To get it yourself, choose **Copy CDP URL** from a tab's menu
+up without setup. Agents use T3's browser tools unless you turn on **Use agent-browser** in
+**Settings → Integrations**, which tells them to drive the same tabs with agent-browser
+instead; projects can override it. To get the address yourself, choose **Copy CDP URL** from a tab's menu
 in the desktop app, or run this on the host:
 
 ```sh

@@ -78,6 +78,7 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
   const mixedWorkspace = useScopedSettingsMixed(["defaultThreadEnvMode"]);
   const mixedSubmodules = useScopedSettingsMixed(["worktreeSubmodules"]);
   const mixedBrowser = useScopedSettingsMixed(["enableAgentBrowserAccess"]);
+  const mixedBrowserTooling = useScopedSettingsMixed(["agentBrowserTooling"]);
   const mixedAutoPull = useScopedSettingsMixed(["defaultAutoPull"]);
   const mixedAgentCredits = useScopedSettingsMixed(["removeAgentCreditsOnMerge"]);
   const mixedMergeMethod = useScopedSettingsMixed(["pullRequestMergeMethod"]);
@@ -520,6 +521,43 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
                 mixed={mixedBrowser}
                 checked={mixedBrowser ? false : settings.enableAgentBrowserAccess}
                 onCheckedChange={(enabled) => updateSettings({ enableAgentBrowserAccess: enabled })}
+              />
+            }
+          />
+          <SettingsRow
+            serverScoped
+            settingKeys={["agentBrowserTooling"]}
+            mixed={mixedBrowserTooling}
+            id={searchableSetting("agent-browser-tooling").id}
+            title="Use agent-browser"
+            description={
+              isProjectScope
+                ? "Tell agents in this project to drive the shared browser with the agent-browser CLI instead of T3's browser tools. Both reach the same tabs. Applies when the agent session next starts."
+                : "Tell agents to drive the shared browser with the agent-browser CLI instead of T3's browser tools. Both reach the same tabs. Projects can override it."
+            }
+            resetAction={
+              settings.agentBrowserTooling !== DEFAULT_SERVER_SETTINGS.agentBrowserTooling ? (
+                <SettingResetButton
+                  label="default browser tooling"
+                  onClick={() =>
+                    updateSettings({
+                      agentBrowserTooling: DEFAULT_SERVER_SETTINGS.agentBrowserTooling,
+                    })
+                  }
+                />
+              ) : null
+            }
+            control={
+              <Switch
+                aria-label="Use agent-browser"
+                mixed={mixedBrowserTooling}
+                disabled={!mixedBrowser && !settings.enableAgentBrowserAccess}
+                checked={
+                  mixedBrowserTooling ? false : settings.agentBrowserTooling === "agent-browser"
+                }
+                onCheckedChange={(enabled) =>
+                  updateSettings({ agentBrowserTooling: enabled ? "agent-browser" : "t3" })
+                }
               />
             }
           />

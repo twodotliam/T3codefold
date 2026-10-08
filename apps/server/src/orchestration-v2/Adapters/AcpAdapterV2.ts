@@ -95,6 +95,7 @@ import { ACP_SESSION_MODE_OPTION_ID } from "../../provider/acp/AcpSessionConfig.
 import * as AcpSessionRuntime from "../../provider/acp/AcpSessionRuntime.ts";
 import {
   t3AcpPromptWithInstructions,
+  t3AgentBrowserInstructionsFor,
   type T3AcpInstructionState,
 } from "../../provider/T3OrchestrationInstructions.ts";
 import { buildRuntimeInstructions } from "../../provider/RuntimeInstructions.ts";
@@ -6731,6 +6732,11 @@ export function makeAcpAdapterV2(
           const instructionState = {
             interactionMode: turnInput.runtimePolicy.interactionMode,
             hasT3Mcp: acpMcpServers(turnInput.threadId, self).length > 0,
+            // ACP agents do not receive AGENT_BROWSER_CDP, so the block carries the URL.
+            agentBrowserInstructions: t3AgentBrowserInstructionsFor(
+              McpProviderSession.readMcpProviderSession(turnInput.threadId),
+              { includeUrl: true },
+            ),
           } satisfies T3AcpInstructionState;
           const previousInstructionState = (yield* Ref.get(promptInstructionStates)).get(sessionId);
           const messageText = providerMessageTextWithAttachmentPaths({

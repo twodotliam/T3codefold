@@ -1,4 +1,9 @@
-import type { EnvironmentId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import type {
+  AgentBrowserTooling,
+  EnvironmentId,
+  ProviderInstanceId,
+  ThreadId,
+} from "@t3tools/contracts";
 
 export interface McpProviderSessionConfig {
   readonly environmentId: EnvironmentId;
@@ -28,6 +33,8 @@ export interface McpProviderSessionConfig {
    * agent-browser drives the thread's tabs without being told where they are.
    */
   readonly previewCdpUrl?: string;
+  /** Which browser tooling the injected instructions prefer; see `AgentBrowserTooling`. */
+  readonly browserTooling?: AgentBrowserTooling;
 }
 
 /** Provider env with the device variables applied over `base`, or `base` untouched. */
