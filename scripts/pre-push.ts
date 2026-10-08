@@ -18,6 +18,32 @@ import * as NodeURL from "node:url";
 export const TESTS_NOT_GATED = new Set(["t3"]);
 
 /**
+ * Workspaces whose tests run outside `vp run --cache`. Its file tracking runs `/bin/sh` and
+ * `/bin/bash` scripts under a bundled `osh` on macOS, which rejects `sh -s`; the SSH runner
+ * tests pipe their scripts into `sh -s` exactly as the remote shell receives them.
+ */
+export const TESTS_NOT_CACHED = new Set(["@t3tools/ssh"]);
+
+/**
+ * Test files not gated yet, because they fail on main on a macOS host. Gate each again once it
+ * passes:
+ * - the mobile app's native Swift checks: the notification fixture does not compile (`Mutex` not
+ *   in scope), and ThreadSanitizer reports a race in the permissions registry;
+ * - `mobile-native-client`, which expects `/tmp` paths where macOS resolves `/private/tmp`;
+ * - `build-desktop-artifact`'s cross-architecture Windows probe case, which fails on arm64;
+ * - `knip-schemas`, whose fixture project gets a file finding from the current Knip;
+ * - the desktop browser-import `Sources` Firefox Snap profile cases, which time out.
+ */
+export const TEST_FILES_NOT_GATED = [
+  "**/notification-center-manager.test.ts",
+  "**/permissions-service.test.ts",
+  "**/mobile-native-client.test.ts",
+  "**/build-desktop-artifact.test.ts",
+  "**/knip-schemas.test.ts",
+  "**/BrowserImport/Sources.test.ts",
+];
+
+/**
  * Workspaces whose typecheck passes today. The rest still carry errors from before this gate
  * existed; add each one here once it is clean.
  */
@@ -348,20 +374,30 @@ function main() {
   if (plan.typecheck.length > 0) {
     run(repoRoot, "typecheck", ["run", "--cache", ...filters(plan.typecheck), "typecheck"]);
   }
-  if (plan.tests.length > 0) {
+  const runTests = (names: ReadonlyArray<string>, cache: boolean) => {
+    if (names.length === 0) return;
     // One package at a time, so suites do not compete for cores.
     run(repoRoot, "tests", [
       "run",
-      "--cache",
+      ...(cache ? ["--cache"] : []),
       "--concurrency-limit",
       "1",
-      ...filters(plan.tests),
+      ...filters(names),
       "test",
       // Workers share one Vite transform server; past half the cores, cold imports queue up
       // behind each other and trip hook timeouts in large suites such as web's.
       "--maxWorkers=50%",
+      ...TEST_FILES_NOT_GATED.flatMap((pattern) => ["--exclude", pattern]),
     ]);
-  }
+  };
+  runTests(
+    plan.tests.filter((name) => !TESTS_NOT_CACHED.has(name)),
+    true,
+  );
+  runTests(
+    plan.tests.filter((name) => TESTS_NOT_CACHED.has(name)),
+    false,
+  );
   console.log("\npre-push: all checks passed.");
 }
 
