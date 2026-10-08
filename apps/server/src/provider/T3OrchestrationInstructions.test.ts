@@ -2,10 +2,12 @@ import { assert, describe, it } from "@effect/vitest";
 import { ThreadId } from "@t3tools/contracts";
 
 import {
+  T3_CODE_BROWSER_BRIEF_INSTRUCTIONS,
   T3_CODE_BROWSER_TOOL_INSTRUCTIONS,
   T3_CODE_ORCHESTRATION_INSTRUCTIONS,
   t3AcpPromptWithInstructions,
   t3AgentBrowserInstructionsFor,
+  t3BrowserInstructionsFor,
   t3OrchestrationPromptForFirstRun,
   t3OrchestrationSystemPrompt,
 } from "./T3OrchestrationInstructions.ts";
@@ -136,6 +138,19 @@ describe("T3 orchestration provider instructions", () => {
       });
       assert.include(prompt, "T3 Code browser: agent-browser");
       assert.notInclude(prompt, T3_CODE_BROWSER_TOOL_INSTRUCTIONS.trim());
+    });
+
+    it("gives sessions on T3's tools the brief block, and none without browser tools", () => {
+      const t3Session = { threadId, browserTooling: "t3", previewCdpUrl: cdpUrl };
+      assert.equal(
+        t3BrowserInstructionsFor(t3Session, { includeUrl: false }),
+        T3_CODE_BROWSER_BRIEF_INSTRUCTIONS,
+      );
+      assert.include(
+        t3BrowserInstructionsFor(session, { includeUrl: false }),
+        "T3 Code browser: agent-browser",
+      );
+      assert.isUndefined(t3BrowserInstructionsFor({ threadId }, { includeUrl: false }));
     });
 
     it("adds the block after the orchestration instructions for system prompts", () => {

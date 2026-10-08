@@ -115,7 +115,7 @@ import type { ServerProviderShape } from "../../provider/ServerProvider.ts";
 import { mergeProviderInstanceEnvironment } from "../../provider/ProviderInstanceEnvironment.ts";
 import {
   T3_CODE_ORCHESTRATION_INSTRUCTIONS,
-  t3AgentBrowserInstructionsFor,
+  t3BrowserInstructionsFor,
 } from "../../provider/T3OrchestrationInstructions.ts";
 import { buildRuntimeInstructions } from "../../provider/RuntimeInstructions.ts";
 import { mcpToolPresentation, normalizeMcpText } from "../../provider/McpToolPresentation.ts";
@@ -822,7 +822,7 @@ export function makeClaudeQueryOptions(input: {
   readonly environment?: NodeJS.ProcessEnv;
   readonly mcpServers?: ClaudeQueryOptions["mcpServers"];
   /** The agent-browser block when the session prefers agent-browser tooling. */
-  readonly agentBrowserInstructions?: string | undefined;
+  readonly browserInstructions?: string | undefined;
   readonly tools?: ClaudeAgentSdkQueryTools;
   readonly allowedTools?: ReadonlyArray<string>;
   readonly disallowedTools?: ReadonlyArray<string>;
@@ -916,9 +916,9 @@ export function makeClaudeQueryOptions(input: {
       append:
         buildRuntimeInstructions({ harness: "Claude Code" }) +
         (input.mcpServers === undefined ? "" : T3_CODE_ORCHESTRATION_INSTRUCTIONS) +
-        (input.mcpServers === undefined || input.agentBrowserInstructions === undefined
+        (input.mcpServers === undefined || input.browserInstructions === undefined
           ? ""
-          : `\n${input.agentBrowserInstructions}\n`),
+          : `\n${input.browserInstructions}\n`),
     },
     ...(Object.keys(extraArgs).length === 0 ? {} : { extraArgs }),
   };
@@ -7145,7 +7145,7 @@ export function makeClaudeAdapterV2(
               turnInput.threadId,
             ),
             // The process receives AGENT_BROWSER_CDP, so the block needs no URL.
-            agentBrowserInstructions: t3AgentBrowserInstructionsFor(
+            browserInstructions: t3BrowserInstructionsFor(
               McpProviderSession.readMcpProviderSession(turnInput.threadId),
               { includeUrl: false },
             ),

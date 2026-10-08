@@ -95,6 +95,20 @@ export function t3AgentBrowserInstructionsFor(
   );
 }
 
+/** A short preview-first block for system prompts that have no browser section of their own. */
+export const T3_CODE_BROWSER_BRIEF_INSTRUCTIONS = `## T3 Code browser
+
+Use the \`preview_*\` tools for browser work rather than launching another browser: they drive this thread's tabs, shared with the user. Start with \`preview_status\`, then \`preview_open\` if no tab is attached. agent-browser is also set up for these tabs; use it only when the user or repository asks, and then run it plainly (\`agent-browser snapshot -i\`) without \`--cdp\`, \`--session\`, or \`connect\`.`;
+
+/** The browser block for a session with browser tools: agent-browser's when it prefers that, otherwise the brief one. */
+export function t3BrowserInstructionsFor(
+  session: Parameters<typeof t3AgentBrowserInstructionsFor>[0],
+  options: { readonly includeUrl: boolean },
+): string | undefined {
+  if (session?.previewCdpUrl === undefined) return undefined;
+  return t3AgentBrowserInstructionsFor(session, options) ?? T3_CODE_BROWSER_BRIEF_INSTRUCTIONS;
+}
+
 const T3_CODE_ACP_DEFAULT_MODE_INSTRUCTIONS = `## T3 Code interaction mode: Default
 
 Prefer making reasonable assumptions and carrying out the user's request. Ask a concise question only when a missing user decision would materially change the result. Treat this mode as active until T3 Code supplies a different interaction-mode instruction.`;
