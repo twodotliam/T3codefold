@@ -37,6 +37,7 @@ import { resolveDiscoveredServerUrl } from "~/browser/browserTargetResolver";
 import { useEnvironmentHttpBaseUrl } from "~/state/environments";
 import { previewEnvironment } from "~/state/preview";
 import { useAtomCommand } from "~/state/use-atom-command";
+import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import {
   browserMiniPlayerSource,
   selectThreadPreviewMiniPlayerTabId,
@@ -138,6 +139,17 @@ export function PreviewView({
   const open = useAtomCommand(previewEnvironment.open);
   const resize = useAtomCommand(previewEnvironment.resize, "preview viewport resize");
   const adjust = useAtomCommand(previewEnvironment.adjust, "preview appearance or zoom");
+  const readCdpUrl = useAtomCommand(previewEnvironment.cdpUrl, { reportFailure: false });
+  const { copyToClipboard: copyCdpUrlText } = useCopyToClipboard<void>({
+    onCopy: () =>
+      toastManager.add({
+        type: "success",
+        title: "CDP URL copied",
+        description: "Pass it to agent-browser with --cdp, or to Playwright's connectOverCDP.",
+      }),
+    onError: (error) =>
+      toastManager.add({ type: "error", title: "Unable to copy", description: error.message }),
+  });
 
   usePreviewSession(threadRef);
 
@@ -420,6 +432,24 @@ export function PreviewView({
    * them through its environment, so every client and agent sees one state.
    * Opening DevTools and a separate window need the desktop's own page.
    */
+  const copyCdpUrl = () =>
+    void readCdpUrl({
+      environmentId: threadRef.environmentId,
+      input: { threadId: threadRef.threadId },
+    }).then((result) => {
+      if (result._tag === "Success" && result.value.url) {
+        copyCdpUrlText(result.value.url);
+        return;
+      }
+      toastManager.add({
+        type: "error",
+        title: "No CDP URL for this thread",
+        description:
+          result._tag === "Failure"
+            ? "The environment did not answer."
+            : "This environment's tabs are not rendered by a desktop app.",
+      });
+    });
   const desktopCall = (op: ((tabId: string) => Promise<void>) | undefined) => () => {
     if (op && runtimeTabId) void op(runtimeTabId).catch(() => undefined);
   };
@@ -436,6 +466,7 @@ export function PreviewView({
           ? {
               openDevTools: desktopCall(previewBridge.openDevTools),
               toggleNativePictureInPicture: () => handleNativePictureInPicture(),
+              copyCdpUrl,
             }
           : {}),
       }

@@ -44,6 +44,8 @@ You are running inside T3 Code. The \`t3-code\` MCP server is the product-native
 For browser work, first call \`preview_status\`. If no automation-capable preview is attached, call \`preview_open\` before concluding that the browser is unavailable. Then use \`preview_navigate\`, \`preview_snapshot\`, and the focused interaction tools. Prefer snapshot-provided locators over coordinates.
 
 Do not switch to global browser skills, Chrome, Node REPL browser automation, standalone Playwright, or agent-browser merely because the preview is initially closed or a first call fails. Use an alternative browser system only when the T3 preview tools are absent, the user explicitly requests another browser, or \`preview_open\` returns an explicit unsupported/unavailable error. A failed T3 preview tool call should be inspected and retried with corrected arguments when the error is actionable.
+
+When the user or the repository's own workflow calls for a CDP client such as agent-browser or Playwright, drive this thread's preview tabs with it instead of launching a separate browser: \`preview_status\` reports the thread's endpoint as \`cdpUrl\`, and \`AGENT_BROWSER_CDP\` carries it when set (\`agent-browser --cdp "$AGENT_BROWSER_CDP" snapshot\`, or Playwright's \`chromium.connectOverCDP(cdpUrl)\`). Its targets are the thread's tabs; opening a target opens a tab the user sees. The preview keeps its own viewport size and color scheme.
 `;
 
 const T3_CODE_ACP_DEFAULT_MODE_INSTRUCTIONS = `## T3 Code interaction mode: Default

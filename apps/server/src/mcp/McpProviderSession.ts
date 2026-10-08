@@ -22,6 +22,12 @@ export interface McpProviderSessionConfig {
    * already pointed at the server's daemon; the agent never handles a token.
    */
   readonly agentDeviceEnvironment?: Readonly<Record<string, string>>;
+  /**
+   * The thread's preview CDP endpoint, when the session may use the browser and
+   * a desktop app renders its tabs. Exported as `AGENT_BROWSER_CDP`, so
+   * agent-browser drives the thread's tabs without being told where they are.
+   */
+  readonly previewCdpUrl?: string;
 }
 
 /** Provider env with the device variables applied over `base`, or `base` untouched. */
@@ -66,13 +72,17 @@ function clearAllMcpProviderSessions(): void {
 export function workCliEnvironment(threadId: ThreadId): Readonly<Record<string, string>> {
   const session = readMcpProviderSession(threadId);
   return session
-    ? { T3_WORK_ENDPOINT: session.endpoint, T3_WORK_AUTHORIZATION: session.authorizationHeader }
+    ? {
+        T3_WORK_ENDPOINT: session.endpoint,
+        T3_WORK_AUTHORIZATION: session.authorizationHeader,
+        ...(session.previewCdpUrl ? { AGENT_BROWSER_CDP: session.previewCdpUrl } : {}),
+      }
     : {};
 }
 
 /**
- * Provider env with the thread's `t3 work` credential applied over `base`, or
- * `base` untouched. Adapters call it where they spawn a per-thread process.
+ * Provider env with the thread's `t3 work` credential and preview CDP endpoint
+ * applied over `base`, or `base` untouched. Adapters call it where they spawn a per-thread process.
  * The device shim is separate (`withAgentDeviceEnvironment`) and not applied
  * here; devices reach agents through the MCP device tools.
  */

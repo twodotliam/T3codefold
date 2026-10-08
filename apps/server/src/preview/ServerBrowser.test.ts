@@ -65,6 +65,7 @@ function makeSession() {
       if (method === "Page.getNavigationHistory") return { currentIndex: 0, entries: [{}] };
       if (method === "Page.getLayoutMetrics") return { cssVisualViewport: { pageX: 0, pageY: 0 } };
       if (method === "Page.captureScreenshot") return { data: "ZnJhbWU=" };
+      if (method === "Target.getTargetInfo") return { targetInfo: { targetId: "PAGE-TARGET" } };
       return { result: { value: "evaluated" } };
     }),
   };
@@ -210,6 +211,10 @@ const dependencies = Layer.mergeAll(
       ),
     ),
     isAttached: (key) => Effect.sync(() => desktopRenders(key.tabId)),
+    openSession: () => Effect.die("unused lent session"),
+    closeSession: () => Effect.void,
+    sessionCommand: () => Effect.die("unused lent session"),
+    subscribeSessionEvents: Effect.die("unused lent session"),
     endpoint: (key) =>
       Effect.acquireRelease(Effect.succeed(`ws://desktop/${key.tabId}`), () =>
         Effect.sync(() => releasedDesktopTabs.push(key.tabId)),
@@ -260,6 +265,44 @@ beforeEach(() => {
   releasedDesktopTabs.length = 0;
   desktopConnections.length = 0;
 });
+
+it.live("lends an external tool its own session on a background tab's page", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { browser, tabId } = yield* ready;
+      const threadId = scope.thread.threadId;
+      expect(yield* browser.cdpTargets(threadId)).toEqual([{ tabId, targetId: "PAGE-TARGET" }]);
+
+      const events: Array<[string, string, unknown]> = [];
+      const lent = yield* browser.openCdpSession({
+        threadId,
+        tabId,
+        onEvent: (sessionId, method, params) => events.push([sessionId, method, params]),
+      });
+      // A fresh Chromium session, not the one T3 drives the page with.
+      const [own, external] = contexts[0]!.sessions;
+      expect(external).toBeDefined();
+      yield* Effect.promise(() =>
+        lent.send("Runtime.evaluate", { expression: "1" }, lent.sessionId),
+      );
+      expect(external!.send).toHaveBeenCalledWith("Runtime.evaluate", { expression: "1" });
+      expect(own!.send).not.toHaveBeenCalledWith("Runtime.evaluate", { expression: "1" });
+
+      // Child sessions are unreachable through Playwright, so auto-attach stays off.
+      yield* Effect.promise(() =>
+        lent.send("Target.setAutoAttach", { autoAttach: true }, lent.sessionId),
+      );
+      expect(external!.send).not.toHaveBeenCalledWith("Target.setAutoAttach", expect.anything());
+
+      const [, onEvent] = external!.on.mock.calls.find(([name]) => name === "event")!;
+      onEvent({ method: "Page.loadEventFired", params: { timestamp: 1 } });
+      expect(events).toEqual([[lent.sessionId, "Page.loadEventFired", { timestamp: 1 }]]);
+
+      lent.close();
+      expect(external!.detach).toHaveBeenCalled();
+    }),
+  ).pipe(Effect.provide(layer)),
+);
 
 it.live("readiness none responds immediately but takeover input waits for navigation commit", () =>
   Effect.scoped(

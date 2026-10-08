@@ -46,6 +46,11 @@ export interface PreviewMoreMenuActions {
   readonly openDevTools?: () => void;
   /** Absent where the tab cannot get its own window. */
   readonly toggleNativePictureInPicture?: () => void;
+  /**
+   * Copies the thread's CDP endpoint for agent-browser or Playwright. Absent
+   * unless this desktop renders the tab for its own server.
+   */
+  readonly copyCdpUrl?: () => void;
 }
 
 interface Props {
@@ -104,6 +109,11 @@ export function PreviewMoreMenu({
         {actions.openDevTools ? (
           <MenuItem onClick={actions.openDevTools} disabled={disabled}>
             Open DevTools
+          </MenuItem>
+        ) : null}
+        {actions.copyCdpUrl ? (
+          <MenuItem onClick={actions.copyCdpUrl} disabled={disabled}>
+            Copy CDP URL
           </MenuItem>
         ) : null}
         {actions.toggleNativePictureInPicture ? (

@@ -31,42 +31,48 @@ import {
 import * as ServerHttp from "./http.ts";
 
 describe("untraced requests", () => {
-  it.effect("drops the HTTP server span for browser trace exports, query string included", () => {
-    const spanNames: Array<string> = [];
-    return Effect.gen(function* () {
-      const layerRoutes = Layer.effectDiscard(
-        Effect.gen(function* () {
-          const router = yield* HttpRouter.HttpRouter;
-          yield* router.add("POST", "/api/observability/v1/traces", HttpServerResponse.empty());
-          yield* router.add("GET", "/api/environment", HttpServerResponse.empty());
-        }),
-      );
-      const services = yield* Layer.build(
-        withUntracedRequests(HttpRouter.serve(layerRoutes, { disableListenLog: true })).pipe(
-          Layer.provideMerge(NodeHttpServer.layerTest),
+  it.effect(
+    "drops the HTTP server span for trace exports and the CDP endpoint, query included",
+    () => {
+      const spanNames: Array<string> = [];
+      return Effect.gen(function* () {
+        const layerRoutes = Layer.effectDiscard(
+          Effect.gen(function* () {
+            const router = yield* HttpRouter.HttpRouter;
+            yield* router.add("POST", "/api/observability/v1/traces", HttpServerResponse.empty());
+            yield* router.add("GET", "/api/environment", HttpServerResponse.empty());
+            yield* router.add("GET", "/api/preview/cdp", HttpServerResponse.empty());
+          }),
+        );
+        const services = yield* Layer.build(
+          withUntracedRequests(HttpRouter.serve(layerRoutes, { disableListenLog: true })).pipe(
+            Layer.provideMerge(NodeHttpServer.layerTest),
+          ),
+        );
+        const client = Context.get(services, HttpClient.HttpClient);
+
+        yield* client.post("/api/observability/v1/traces");
+        yield* client.post("/api/observability/v1/traces?x=1");
+        // The preview CDP endpoint's token is in its query, which a span would record.
+        yield* client.get("/api/preview/cdp?thread=t&token=secret");
+        expect(spanNames).toEqual([]);
+
+        yield* client.get("/api/environment");
+        expect(spanNames).toContain("http.server GET");
+      }).pipe(
+        Effect.scoped,
+        Effect.provideService(
+          Tracer.Tracer,
+          Tracer.make({
+            span: (options) => {
+              if (options.kind === "server") spanNames.push(options.name);
+              return new Tracer.NativeSpan(options);
+            },
+          }),
         ),
       );
-      const client = Context.get(services, HttpClient.HttpClient);
-
-      yield* client.post("/api/observability/v1/traces");
-      yield* client.post("/api/observability/v1/traces?x=1");
-      expect(spanNames).toEqual([]);
-
-      yield* client.get("/api/environment");
-      expect(spanNames).toContain("http.server GET");
-    }).pipe(
-      Effect.scoped,
-      Effect.provideService(
-        Tracer.Tracer,
-        Tracer.make({
-          span: (options) => {
-            if (options.kind === "server") spanNames.push(options.name);
-            return new Tracer.NativeSpan(options);
-          },
-        }),
-      ),
-    );
-  });
+    },
+  );
 });
 
 describe("browser API CORS", () => {

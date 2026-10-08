@@ -6,6 +6,10 @@
  * desktop tab gets a loopback endpoint with an unguessable path. Its frames
  * cross the bootstrap file descriptors to the desktop's relay, which owns the
  * tab's `webContents.debugger`. The endpoint only bridges to that one tab.
+ *
+ * Tabs also lend independent CDP sessions (`openSession`), which the preview
+ * CDP endpoint hands to external tools. Their commands and events travel as
+ * typed messages rather than relay frames.
  */
 import * as NodeStream from "@effect/platform-node/NodeStream";
 import * as NodeSocketServer from "@effect/platform-node/NodeSocketServer";
@@ -15,6 +19,7 @@ import {
   type DesktopBrowserCommand as DesktopBrowserCommandType,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
+import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -42,6 +47,22 @@ export interface DesktopTabKey {
 
 const keyOf = ({ threadId, tabId }: DesktopTabKey) => `${threadId}\u0000${tabId}`;
 
+/** A CDP event on a lent session or one of its auto-attached children. */
+export interface DesktopSessionEvent extends DesktopTabKey {
+  readonly sessionId: string;
+  readonly method: string;
+  readonly params: unknown;
+}
+
+export class DesktopBrowserSessionError extends Schema.TaggedError<DesktopBrowserSessionError>()(
+  "DesktopBrowserSessionError",
+  { detail: Schema.String },
+) {
+  override get message() {
+    return this.detail;
+  }
+}
+
 export class DesktopBrowserChannel extends Context.Service<
   DesktopBrowserChannel,
   {
@@ -60,6 +81,25 @@ export class DesktopBrowserChannel extends Context.Service<
      * releases the tab on the desktop and stops the endpoint.
      */
     readonly endpoint: (key: DesktopTabKey) => Effect.Effect<string, never, Scope.Scope>;
+    /**
+     * Opens an independent CDP session on an attached tab's page. Detaching it
+     * with `closeSession` undoes its overrides and interception.
+     */
+    readonly openSession: (key: DesktopTabKey) => Effect.Effect<string, DesktopBrowserSessionError>;
+    readonly closeSession: (key: DesktopTabKey, sessionId: string) => Effect.Effect<void>;
+    /** Sends one CDP command on a lent session, failing with the page's CDP error. */
+    readonly sessionCommand: (
+      key: DesktopTabKey,
+      sessionId: string,
+      method: string,
+      params: unknown,
+    ) => Effect.Effect<unknown, DesktopBrowserSessionError>;
+    /** Events on every lent session. Only sessions someone opened produce any. */
+    readonly subscribeSessionEvents: Effect.Effect<
+      PubSub.Subscription<DesktopSessionEvent>,
+      never,
+      Scope.Scope
+    >;
     /** Draws the agent's cursor over a tab the desktop renders. */
     readonly pointer: (
       key: DesktopTabKey,
@@ -74,6 +114,13 @@ const make = Effect.gen(function* () {
   const controlFd = config.desktopBrowserControlFd;
   const changes = yield* PubSub.unbounded<{ key: DesktopTabKey; attached: boolean }>();
   const attachedTabs = new Set<string>();
+  const sessionEvents = yield* PubSub.unbounded<DesktopSessionEvent>();
+  /** Lent-session requests awaiting the desktop's reply, by request id. */
+  const pending = new Map<
+    number,
+    { readonly id: string; readonly reply: Deferred.Deferred<unknown, DesktopBrowserSessionError> }
+  >();
+  let nextRequestId = 0;
   /** CDP frames from the desktop, per tab, for the endpoint connected to it. */
   const inbound = new Map<string, Queue.Queue<string>>();
   const writeLock = yield* Semaphore.make(1);
@@ -85,6 +132,12 @@ const make = Effect.gen(function* () {
       detached: Stream.empty,
       isAttached: () => Effect.succeed(false),
       endpoint: () => Effect.die("No desktop app is attached to this server."),
+      openSession: () =>
+        Effect.fail(new DesktopBrowserSessionError({ detail: "No desktop app is attached." })),
+      closeSession: () => Effect.void,
+      sessionCommand: () =>
+        Effect.fail(new DesktopBrowserSessionError({ detail: "No desktop app is attached." })),
+      subscribeSessionEvents: PubSub.subscribe(sessionEvents),
       pointer: () => Effect.void,
     });
   }
@@ -97,6 +150,19 @@ const make = Effect.gen(function* () {
           Effect.logWarning("desktop browser command failed", { cause }),
         ),
       ),
+    );
+
+  const failPending = (
+    matches: (entry: { readonly id: string }) => boolean,
+    detail: string,
+  ): Effect.Effect<void> =>
+    Effect.forEach(
+      [...pending].filter(([, entry]) => matches(entry)),
+      ([requestId, entry]) => {
+        pending.delete(requestId);
+        return Deferred.fail(entry.reply, new DesktopBrowserSessionError({ detail }));
+      },
+      { discard: true },
     );
 
   const readable = yield* Effect.acquireRelease(
@@ -127,14 +193,50 @@ const make = Effect.gen(function* () {
           attachedTabs.delete(id);
           const queue = inbound.get(id);
           return (queue ? Queue.shutdown(queue) : Effect.void).pipe(
+            Effect.andThen(failPending((entry) => entry.id === id, "The tab detached.")),
             Effect.andThen(PubSub.publish(changes, { key, attached: false })),
           );
         }
+        case "sessionReply": {
+          const entry = pending.get(event.requestId);
+          if (!entry) return Effect.void;
+          pending.delete(event.requestId);
+          return event.error === undefined
+            ? Deferred.succeed(entry.reply, event.result)
+            : Deferred.fail(entry.reply, new DesktopBrowserSessionError({ detail: event.error }));
+        }
+        case "sessionEvent":
+          return PubSub.publish(sessionEvents, {
+            ...key,
+            sessionId: event.sessionId,
+            method: event.method,
+            params: event.params,
+          });
       }
     }),
     Effect.catchCause((cause) => Effect.logWarning("desktop browser channel stopped", { cause })),
+    Effect.andThen(failPending(() => true, "The desktop app disconnected.")),
     Effect.forkScoped,
   );
+
+  /** Sends a lent-session request and waits for the desktop's reply. */
+  const request = (
+    key: DesktopTabKey,
+    message: (requestId: number) => DesktopBrowserCommandType,
+  ): Effect.Effect<unknown, DesktopBrowserSessionError> =>
+    Effect.gen(function* () {
+      const id = keyOf(key);
+      if (!attachedTabs.has(id)) {
+        return yield* new DesktopBrowserSessionError({ detail: "The tab is not attached." });
+      }
+      const requestId = ++nextRequestId;
+      const reply = yield* Deferred.make<unknown, DesktopBrowserSessionError>();
+      pending.set(requestId, { id, reply });
+      yield* command(message(requestId));
+      return yield* Deferred.await(reply).pipe(
+        Effect.onInterrupt(() => Effect.sync(() => pending.delete(requestId))),
+      );
+    });
 
   const endpoint = (key: DesktopTabKey) =>
     Effect.gen(function* () {
@@ -218,6 +320,28 @@ const make = Effect.gen(function* () {
     ),
     isAttached: (key) => Effect.sync(() => attachedTabs.has(keyOf(key))),
     endpoint,
+    openSession: (key) =>
+      request(key, (requestId) => ({ type: "openSession", ...key, requestId })).pipe(
+        Effect.flatMap((result) => {
+          const sessionId = (result as { sessionId?: unknown } | null)?.sessionId;
+          return typeof sessionId === "string"
+            ? Effect.succeed(sessionId)
+            : Effect.fail(
+                new DesktopBrowserSessionError({ detail: "The desktop opened no session." }),
+              );
+        }),
+      ),
+    closeSession: (key, sessionId) => command({ type: "closeSession", ...key, sessionId }),
+    sessionCommand: (key, sessionId, method, params) =>
+      request(key, (requestId) => ({
+        type: "sessionCommand",
+        ...key,
+        requestId,
+        sessionId,
+        method,
+        params,
+      })),
+    subscribeSessionEvents: PubSub.subscribe(sessionEvents),
     pointer: (key, pointer) => command({ type: "pointer", ...key, ...pointer }),
   });
 });

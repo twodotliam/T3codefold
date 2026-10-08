@@ -51,6 +51,7 @@ import * as Queue from "effect/Queue";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Exit from "effect/Exit";
+import * as PubSub from "effect/PubSub";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
@@ -237,8 +238,68 @@ export class ServerBrowser extends Context.Service<
     }) => Effect.Effect<Option.Option<{ readonly path: string; readonly fileName: string }>>;
     /** Deletes a human profile's server-side storage, closing its open tabs first. */
     readonly clearProfile: (profileId: string) => Effect.Effect<void, PreviewClearProfileError>;
+    /** A thread's live tabs and their CDP target ids, wherever their pages run. */
+    readonly cdpTargets: (threadId: string) => Effect.Effect<ReadonlyArray<ServerBrowserCdpTarget>>;
+    /**
+     * Tabs as they become CDP targets, and as they stop being ones (`targetId`
+     * null). Subscribe before reading `cdpTargets` so no change falls between.
+     */
+    readonly subscribeCdpTargets: Effect.Effect<
+      PubSub.Subscription<ServerBrowserCdpTargetChange>,
+      never,
+      Scope.Scope
+    >;
+    /** A tab's target id, starting its page if it has none, as a viewer would. */
+    readonly cdpTarget: (input: {
+      readonly threadId: string;
+      readonly tabId: string;
+    }) => Effect.Effect<string, ServerBrowserTabNotFoundError | ServerBrowserLaunchError>;
+    /**
+     * An independent CDP session on a tab's page for an external tool: a child
+     * session of the desktop's debugger for a desktop tab, a Chromium session
+     * for a headless one. Its overrides and interception end when it closes.
+     */
+    readonly openCdpSession: (input: {
+      readonly threadId: string;
+      readonly tabId: string;
+      readonly onEvent: (sessionId: string, method: string, params: unknown) => void;
+    }) => Effect.Effect<
+      ServerBrowserCdpSession,
+      ServerBrowserTabNotFoundError | ServerBrowserLaunchError | ServerBrowserCdpError
+    >;
   }
 >()("t3/preview/ServerBrowser") {}
+
+export interface ServerBrowserCdpTarget {
+  readonly tabId: string;
+  readonly targetId: string;
+}
+
+export interface ServerBrowserCdpTargetChange {
+  readonly threadId: string;
+  readonly tabId: string;
+  readonly targetId: string | null;
+}
+
+export interface ServerBrowserCdpSession {
+  readonly sessionId: string;
+  /** Sends on this session or one of its children; rejects with the page's CDP error. */
+  readonly send: (
+    method: string,
+    params: Record<string, unknown>,
+    sessionId: string,
+  ) => Promise<unknown>;
+  readonly close: () => void;
+}
+
+export class ServerBrowserCdpError extends Schema.TaggedError<ServerBrowserCdpError>()(
+  "ServerBrowserCdpError",
+  { detail: Schema.String },
+) {
+  override get message() {
+    return this.detail;
+  }
+}
 
 interface ViewerState {
   readonly id: string;
@@ -277,6 +338,8 @@ interface ServerTab {
   readonly tabId: string;
   readonly page: Page;
   readonly cdp: CDPSession;
+  /** The page's CDP target id, which external CDP tools address it by. */
+  readonly targetId: string;
   readonly createdAt: number;
   /** The agent's latest request on this tab; idle agent tabs close. */
   usedAt: number;
@@ -447,6 +510,15 @@ const make = Effect.gen(function* () {
 
   const tabs = new Map<string, ServerTab>();
   const pendingTabs = new Map<string, Promise<ServerTab>>();
+  const cdpTargetChanges = yield* PubSub.unbounded<ServerBrowserCdpTargetChange>();
+  const publishCdpTarget = (tab: ServerTab, live: boolean) =>
+    runFork(
+      PubSub.publish(cdpTargetChanges, {
+        threadId: tab.threadId,
+        tabId: tab.tabId,
+        targetId: live ? tab.targetId : null,
+      }),
+    );
   /** Sessions closed while their tab was still opening; the open discards its page. */
   const closedPendingTabs = new Set<string>();
   /** Popup pages waiting for the tab their `opened` event creates. */
@@ -645,6 +717,7 @@ const make = Effect.gen(function* () {
     const key = tabKey(tab.threadId, tab.tabId);
     if (tabs.get(key) !== tab) return;
     tabs.delete(key);
+    publishCdpTarget(tab, false);
     tab.closing = true;
     // A desktop page outlives the connection unless its session closed with it.
     const end = tab.desktop && !closeSession && sessionOpen(tab) ? "reconnect" : "gone";
@@ -723,6 +796,10 @@ const make = Effect.gen(function* () {
     if (!desktop) await prepareContext(context);
     const page = adopted?.page ?? desktop?.page ?? (await context.newPage());
     const cdp = await context.newCDPSession(page);
+    const targetId = await cdp
+      .send("Target.getTargetInfo")
+      .then((result) => result.targetInfo.targetId)
+      .catch(() => `t3-tab-${snapshot.tabId}`);
     page.setDefaultTimeout(NAVIGATION_TIMEOUT_MS);
     page.setDefaultNavigationTimeout(NAVIGATION_TIMEOUT_MS);
     const control = new SessionControl(snapshot.automationOwner ?? null, () =>
@@ -733,6 +810,7 @@ const make = Effect.gen(function* () {
       tabId: snapshot.tabId,
       page,
       cdp,
+      targetId,
       createdAt: Date.now(),
       usedAt: Date.now(),
       viewers: new Set(),
@@ -834,6 +912,7 @@ const make = Effect.gen(function* () {
     page.on("close", () => dropTab(tab, true));
     page.on("crash", () => dropTab(tab, true));
     tabs.set(key, tab);
+    publishCdpTarget(tab, true);
     reportLiveTabs();
     // A popup is already loading its own URL, and the desktop loads its tab's.
     if (!adopted && !desktop && snapshot.navStatus._tag === "Loading") {
@@ -2191,11 +2270,106 @@ const make = Effect.gen(function* () {
       catch: (cause) => new PreviewClearProfileError({ profileId, cause }),
     });
 
+  /** A headless page's own Chromium session, with every event it receives. */
+  const openHeadlessCdpSession = async (
+    tab: ServerTab,
+    onEvent: (sessionId: string, method: string, params: unknown) => void,
+  ): Promise<ServerBrowserCdpSession> => {
+    const session = await tab.page.context().newCDPSession(tab.page);
+    const sessionId = `t3-headless-${NodeCrypto.randomUUID()}`;
+    session.on("event", ({ method, params }) => onEvent(sessionId, method, params ?? {}));
+    return {
+      sessionId,
+      send: (method, params, target) => {
+        if (target !== sessionId)
+          return Promise.reject(new Error("Session with given id not found."));
+        tab.usedAt = Date.now();
+        // Child sessions cannot be addressed through Playwright, so frames and
+        // workers stay unattached rather than announced and unreachable.
+        if (method === "Target.setAutoAttach") return Promise.resolve({});
+        return session.send(method as never, params as never);
+      },
+      close: () => void session.detach().catch(constVoid),
+    };
+  };
+
+  /** A desktop page's lent child session, whose events arrive over the desktop channel. */
+  const openDesktopCdpSession = async (
+    tab: ServerTab,
+    onEvent: (sessionId: string, method: string, params: unknown) => void,
+  ): Promise<ServerBrowserCdpSession> => {
+    const key = { threadId: tab.threadId, tabId: tab.tabId };
+    const scope = await Effect.runPromise(Scope.make());
+    try {
+      const events = await Effect.runPromise(
+        desktopChannel.subscribeSessionEvents.pipe(Scope.provide(scope)),
+      );
+      runFork(
+        Stream.fromSubscription(events).pipe(
+          Stream.filter((event) => event.threadId === tab.threadId && event.tabId === tab.tabId),
+          Stream.runForEach((event) =>
+            Effect.sync(() => onEvent(event.sessionId, event.method, event.params)),
+          ),
+          Scope.provide(scope),
+        ),
+      );
+      const sessionId = await Effect.runPromise(desktopChannel.openSession(key));
+      return {
+        sessionId,
+        send: (method, params, target) => {
+          tab.usedAt = Date.now();
+          return Effect.runPromise(desktopChannel.sessionCommand(key, target, method, params));
+        },
+        close: () => {
+          runFork(desktopChannel.closeSession(key, sessionId));
+          void Effect.runPromise(Scope.close(scope, Exit.void));
+        },
+      };
+    } catch (cause) {
+      await Effect.runPromise(Scope.close(scope, Exit.void));
+      throw cause;
+    }
+  };
+
+  const cdpTargets: ServerBrowser["Service"]["cdpTargets"] = (threadId) =>
+    Effect.sync(() =>
+      [...tabs.values()]
+        .filter((tab) => tab.threadId === threadId)
+        .map((tab) => ({ tabId: tab.tabId, targetId: tab.targetId })),
+    );
+
+  const cdpTarget: ServerBrowser["Service"]["cdpTarget"] = ({ threadId, tabId }) =>
+    findTab(threadId, tabId).pipe(Effect.map((tab) => tab.targetId));
+
+  const openCdpSession: ServerBrowser["Service"]["openCdpSession"] = ({
+    threadId,
+    tabId,
+    onEvent,
+  }) =>
+    findTab(threadId, tabId).pipe(
+      Effect.flatMap((tab) =>
+        Effect.tryPromise({
+          try: () =>
+            tab.desktop
+              ? openDesktopCdpSession(tab, onEvent)
+              : openHeadlessCdpSession(tab, onEvent),
+          catch: (cause) =>
+            new ServerBrowserCdpError({
+              detail: cause instanceof Error ? cause.message : String(cause),
+            }),
+        }),
+      ),
+    );
+
   return ServerBrowser.of({
     attachViewer,
     clearProfile,
     openDownload,
     answerFileChooser,
+    cdpTargets,
+    subscribeCdpTargets: PubSub.subscribe(cdpTargetChanges),
+    cdpTarget,
+    openCdpSession,
   });
 });
 

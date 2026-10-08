@@ -424,6 +424,7 @@ export const WS_METHODS = {
   previewClose: "preview.close",
   previewList: "preview.list",
   previewClearProfile: "preview.clearProfile",
+  previewCdpUrl: "preview.cdpUrl",
   previewReportStatus: "preview.reportStatus",
 
   // Device methods
@@ -1420,6 +1421,16 @@ const WsPreviewListRpc = Rpc.make(WS_METHODS.previewList, {
   error: EnvironmentAuthorizationError,
 });
 
+/**
+ * The thread's CDP browser endpoint for external tools on the environment's
+ * machine; null when no desktop app renders its tabs.
+ */
+const WsPreviewCdpUrlRpc = Rpc.make(WS_METHODS.previewCdpUrl, {
+  payload: PreviewListInput,
+  success: Schema.Struct({ url: Schema.NullOr(Schema.String) }),
+  error: EnvironmentAuthorizationError,
+});
+
 const WsPreviewClearProfileRpc = Rpc.make(WS_METHODS.previewClearProfile, {
   payload: PreviewClearProfileInput,
   error: Schema.Union([PreviewClearProfileError, EnvironmentAuthorizationError]),
@@ -1885,6 +1896,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsPreviewRefreshRpc,
   WsPreviewCloseRpc,
   WsPreviewListRpc,
+  WsPreviewCdpUrlRpc,
   WsPreviewClearProfileRpc,
   WsPreviewReportStatusRpc,
   WsSubscribePreviewEventsRpc,
